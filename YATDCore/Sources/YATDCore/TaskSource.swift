@@ -1,6 +1,6 @@
 import Foundation
 
-/// Where tasks live. `NtnCLISource` today; a direct REST/OAuth source can be added later.
+/// Where tasks live. `NotionSource` over the `ntn` CLI or HTTPS.
 public protocol TaskSource: Sendable {
     /// All tasks that aren't done.
     func fetchOpen() async throws -> [TodoTask]

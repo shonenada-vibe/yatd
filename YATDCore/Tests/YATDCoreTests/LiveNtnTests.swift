@@ -9,7 +9,7 @@ struct LiveNtnTests {
     @Test func createCompleteRecurAndClean() async throws {
         let ds = ProcessInfo.processInfo.environment["YATD_LIVE_DS"]!
         let cli = try #require(NtnCLI.locate())
-        let source = NtnCLISource(dataSourceID: ds, cli: cli)
+        let source = NotionSource(dataSourceID: ds, transport: cli)
         let planner = Planner()
         let today = planner.today(.now)
 
@@ -35,7 +35,7 @@ struct LiveNtnTests {
         // A second Mac completing the same task now sees the copy and doesn't create another.
         #expect(planner.alreadyScheduled(next, in: try await source.openTasks(titled: next.title)))
 
-        let discovered = try await NtnCLISource.discover(cli: cli)
+        let discovered = try await NotionSource.discover(transport: cli)
         #expect(discovered.contains { $0.config.dataSourceID == ds })
 
         #expect(try await source.fetchDone(on: today).contains { $0.id == created.id })

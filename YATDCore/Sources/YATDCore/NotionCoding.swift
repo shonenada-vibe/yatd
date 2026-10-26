@@ -140,6 +140,8 @@ public enum NotionError: LocalizedError {
     case cliNotFound
     case cliFailed(status: Int32, stderr: String)
     case notConfigured
+    case notSignedIn
+    case httpFailed(status: Int, body: String)
 
     public var errorDescription: String? {
         switch self {
@@ -147,6 +149,10 @@ public enum NotionError: LocalizedError {
         case .cliNotFound: "Couldn't find the `ntn` CLI. Install it or set its path in Settings."
         case .cliFailed(let status, let stderr): "ntn exited with \(status): \(stderr.prefix(300))"
         case .notConfigured: "No Notion database configured yet."
+        case .notSignedIn: "Add a Notion integration token in Settings."
+        case .httpFailed(401, _): "Notion rejected the token. Check it in Settings."
+        case .httpFailed(404, _): "Notion can't find that page. Share it with your integration (••• → Connections)."
+        case .httpFailed(let status, let body): "Notion error \(status): \(body.prefix(300))"
         }
     }
 }

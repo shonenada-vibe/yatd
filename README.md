@@ -5,15 +5,15 @@ A macOS menu bar app that shows your **top 3 tasks for today** from a Notion dat
 ## Requirements
 
 - macOS 15+
-- [`ntn`](https://developers.notion.com) (Notion CLI), logged in: `ntn login`
+- [`ntn`](https://developers.notion.com) (Notion CLI), logged in: `ntn login`, or a Notion integration token (see below)
 - Xcode + `xcodegen` (`brew install xcodegen`) to build
 
 ## Build & run
 
 ```sh
-make run       # build Release and launch
-make install   # copy to /Applications
-make test      # unit tests
+just run        # build Debug, launch, stream logs (Ctrl-C quits)
+just install    # build Release into /Applications
+just test       # unit tests
 ```
 
 On first launch, click **Create “YATD” page in Notion**, or paste an existing database URL. The app creates a `YATD` page with an inline **Tasks** database:
@@ -31,19 +31,42 @@ On first launch, click **Create “YATD” page in Notion**, or paste an existin
 
 Databases created by older versions get `Started`/`Finished` added automatically on the next sync.
 
+## Connecting to Notion
+
+- **ntn CLI** (default for builds from source): reuses `ntn login`. Needs no setup beyond the CLI.
+- **Integration token** (always used by the TestFlight / App Store build, optional elsewhere in Settings):
+  1. Create an internal integration at https://www.notion.so/profile/integrations and copy its token.
+  2. In Notion, open the page that holds (or will hold) YATD → ••• → Connections → add the integration.
+  3. Paste the token in YATD. It's stored in Keychain. Then pick the database it finds, or paste that page's URL to create YATD inside it. Integrations can't create workspace-level pages.
+
 ## Releasing
 
-YATD runs `ntn` as a subprocess, so it can't be sandboxed, and the Mac App Store and TestFlight are off the table. Releases are **Developer ID signed and notarized** with fastlane:
+The regular build runs `ntn` as a subprocess, so it isn't sandboxed. The **`AppStore`** build configuration is sandboxed (network client only) and uses the integration token instead, which is what TestFlight requires.
 
 ```sh
 bundle install                 # once; fastlane goes to vendor/bundle
 cp .env.example .env           # fill in ASC key, match repo, optional GITHUB_TOKEN
-make sync-certs                # once: create/fetch the Developer ID certificate via match
-make release                   # build → sign → notarize → staple → build/release/YATD-<ver>-<n>.zip, tag build-<n>
-make publish                   # upload that zip to a GitHub release (draft by default)
 ```
 
-The version comes from `MARKETING_VERSION` in `project.yml`; the build number defaults to the git commit count.
+**TestFlight** (sandboxed `AppStore` build):
+
+```sh
+just sync-appstore-certs       # once: Mac App Store distribution + installer certs, profile
+just beta                      # build .pkg → upload to TestFlight, tag build-<n>
+just distribute [build]        # send an uploaded build to the external "Public" group
+```
+
+The app record must exist in App Store Connect first (＋ → New App → macOS, bundle ID `com.shonenada.yatd`). The API can't create it.
+
+**Direct download** (Developer ID, notarized):
+
+```sh
+just sync-certs                # once: create/fetch the Developer ID certificate via match
+just release                   # build → sign → notarize → staple → build/release/YATD-<ver>-<n>.zip, tag build-<n>
+just publish                   # upload that zip to a GitHub release (draft by default)
+```
+
+The version comes from `MARKETING_VERSION` in `project.yml`; the build number defaults to the git commit count. Regenerate the icon with `swift scripts/make-icon.swift`.
 
 ## How the top 3 is picked
 

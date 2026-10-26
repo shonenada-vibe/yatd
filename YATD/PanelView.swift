@@ -14,7 +14,7 @@ struct PanelView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            if !store.isConfigured {
+            if !store.isConfigured || !store.hasCredentials {
                 SetupView()
             } else {
                 switch tab {
@@ -251,40 +251,83 @@ struct SetupView: View {
     @Environment(TaskStore.self) private var store
     @State private var input = ""
 
+    private var usesToken: Bool { store.connection == .token }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Connect a Notion database").font(.subheadline.bold())
-            if store.isDiscovering {
-                ProgressView("Looking for an existing YATD database…").controlSize(.small)
-            } else if let found = store.discovered {
-                if !found.isEmpty {
-                    Text("Found in your workspace:").font(.caption).foregroundStyle(.secondary)
-                    ForEach(found) { db in
-                        Button {
-                            Task { await store.connect(db) }
-                        } label: {
-                            Label(db.title, systemImage: "checklist")
-                        }
-                        .help(db.lastEdited.map { "Edited \($0.formatted(.relative(presentation: .named)))" } ?? "")
-                    }
-                    Divider()
+            if !store.hasCredentials {
+                TokenSignIn()
+            } else {
+                found
+                Text(usesToken
+                     ? "Or paste a database URL, or a page shared with your integration to create YATD inside it:"
+                     : "Or paste a database URL (or a page URL to create YATD inside it):")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    TextField("https://notion.so/…", text: $input)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Connect") { Task { await store.connect(input) } }
+                        .disabled(input.isEmpty)
                 }
+            }
+        }
+        .task(id: store.hasCredentials) {
+            if store.hasCredentials { await store.discover() }
+        }
+    }
+
+    @ViewBuilder private var found: some View {
+        if store.isDiscovering {
+            ProgressView("Looking for an existing YATD database…").controlSize(.small)
+        } else if let found = store.discovered {
+            if !found.isEmpty {
+                Text("Found in your workspace:").font(.caption).foregroundStyle(.secondary)
+                ForEach(found) { db in
+                    Button {
+                        Task { await store.connect(db) }
+                    } label: {
+                        Label(db.title, systemImage: "checklist")
+                    }
+                    .help(db.lastEdited.map { "Edited \($0.formatted(.relative(presentation: .named)))" } ?? "")
+                }
+                Divider()
+            }
+            // Integration tokens can't create workspace-level pages; they go through a shared page below.
+            if !usesToken {
                 Button(found.isEmpty ? "Create “YATD” page in Notion" : "Create a new one instead") {
                     Task { await store.createDatabase() }
                 }
-            } else {
-                // Search failed (error shown below): don't offer Create, it could duplicate.
-                Button("Search again") { Task { await store.discover() } }
             }
-            Text("or paste a database URL:").font(.caption).foregroundStyle(.secondary)
+        } else {
+            // Search failed (error shown below): don't offer Create, it could duplicate.
+            Button("Search again") { Task { await store.discover() } }
+        }
+    }
+}
+
+/// Paste-a-token form for the integration-token connection.
+struct TokenSignIn: View {
+    @Environment(TaskStore.self) private var store
+    @State private var token = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Create an internal integration at notion.so/profile/integrations, then share your YATD page with it (••• → Connections).")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Link("Open Notion integrations", destination: URL(string: "https://www.notion.so/profile/integrations")!)
+                .font(.caption)
             HStack {
-                TextField("https://notion.so/…", text: $input)
+                SecureField("ntn_… integration token", text: $token)
                     .textFieldStyle(.roundedBorder)
-                Button("Connect") { Task { await store.connect(input) } }
-                    .disabled(input.isEmpty)
+                Button("Save") {
+                    Task { await store.setConnection(.token, token: token); token = "" }
+                }
+                .disabled(token.isEmpty)
             }
         }
-        .task { await store.discover() }
     }
 }
 

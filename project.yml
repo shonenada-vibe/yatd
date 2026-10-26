@@ -3,6 +3,11 @@ options:
   bundleIdPrefix: com.shonenada
   deploymentTarget:
     macOS: "15.0"
+configs:
+  Debug: debug
+  Release: release
+  # Sandboxed Mac App Store / TestFlight build (see fastlane `beta`).
+  AppStore: release
 packages:
   YATDCore:
     path: YATDCore
@@ -27,13 +32,23 @@ targets:
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.productivity
         NSHumanReadableCopyright: ""
+        ITSAppUsesNonExemptEncryption: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shonenada.yatd
-        # Runs the `ntn` CLI as a subprocess, which the App Sandbox forbids.
+        # Debug/Release run the `ntn` CLI as a subprocess, which the App Sandbox forbids.
         ENABLE_APP_SANDBOX: NO
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "-"
         GENERATE_INFOPLIST_FILE: NO
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        # Sandboxed; reaches Notion over HTTPS with an integration token instead of `ntn`.
+        AppStore:
+          ENABLE_APP_SANDBOX: YES
+          CODE_SIGN_ENTITLEMENTS: YATD/AppStore.entitlements
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          DEVELOPMENT_TEAM: H2CJGWVMU4
+          PROVISIONING_PROFILE_SPECIFIER: match AppStore com.shonenada.yatd macos

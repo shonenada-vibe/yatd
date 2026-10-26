@@ -16,6 +16,21 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Notion") {
+                if !Pref.isSandboxed {
+                    Picker("Connect with", selection: Binding(
+                        get: { store.connection },
+                        set: { mode in Task { await store.setConnection(mode, token: Keychain.token) } }
+                    )) {
+                        ForEach(Connection.allCases) { Text($0.label).tag($0) }
+                    }
+                }
+                if store.connection == .token {
+                    LabeledContent("Token") {
+                        Text(store.hasCredentials ? "Saved in Keychain" : "Not set")
+                            .foregroundStyle(.secondary)
+                    }
+                    TokenSignIn()
+                }
                 LabeledContent("Data source") {
                     Text(store.config?.dataSourceID ?? "Not connected")
                         .textSelection(.enabled)
@@ -29,8 +44,12 @@ struct SettingsView: View {
                     Button("Connect") { Task { await store.connect(connectInput) } }
                         .disabled(connectInput.isEmpty)
                 }
-                Button("Create a new “YATD” page in Notion") { Task { await store.createDatabase() } }
-                TextField("ntn path", text: $ntnPath, prompt: Text(NtnCLI.locate()?.executable.path ?? "auto"))
+                if store.connection == .ntn {
+                    Button("Create a new “YATD” page in Notion") { Task { await store.createDatabase() } }
+                }
+                if store.connection == .ntn {
+                    TextField("ntn path", text: $ntnPath, prompt: Text(NtnCLI.locate()?.executable.path ?? "auto"))
+                }
                 Stepper("Sync every \(pollSeconds)s", value: $pollSeconds, in: 15...600, step: 15)
             }
             Section("Panel") {

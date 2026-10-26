@@ -41,21 +41,43 @@ final class TaskStore {
 
     // MARK: Source
 
-    private func cli() throws -> NtnCLI {
-        guard let cli = NtnCLI.locate(preferred: UserDefaults.standard.string(forKey: Pref.ntnPath)) else {
-            throw NotionError.cliNotFound
+    /// Whether the app can talk to Notion yet (always true for ntn; a saved token otherwise).
+    private(set) var hasCredentials = Pref.connectionMode == .ntn || Keychain.token != nil
+    private(set) var connection = Pref.connectionMode
+
+    private func transport() throws -> any NotionTransport {
+        switch Pref.connectionMode {
+        case .ntn:
+            guard let cli = NtnCLI.locate(preferred: UserDefaults.standard.string(forKey: Pref.ntnPath)) else {
+                throw NotionError.cliNotFound
+            }
+            return cli
+        case .token:
+            guard let token = Keychain.token else { throw NotionError.notSignedIn }
+            return NotionHTTP(token: token)
         }
-        return cli
     }
 
     private func source() throws -> any TaskSource {
         guard let config else { throw NotionError.notConfigured }
-        return NtnCLISource(dataSourceID: config.dataSourceID, cli: try cli())
+        return NotionSource(dataSourceID: config.dataSourceID, transport: try transport())
+    }
+
+    func setConnection(_ mode: Connection, token: String?) async {
+        await perform {
+            Pref.connectionMode = mode
+            self.connection = Pref.connectionMode
+            if mode == .token { try Keychain.setToken(token?.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            self.hasCredentials = mode == .ntn || Keychain.token != nil
+            self.schemaChecked = false
+            self.error = nil
+        }
+        if config == nil { await discover() } else { await refresh() }
     }
 
     func connect(_ input: String) async {
         await perform {
-            let config = try await NtnCLISource.resolve(input, cli: try self.cli())
+            let config = try await NotionSource.resolve(input, transport: try self.transport())
             self.setConfig(config)
         }
         await refresh()
@@ -71,13 +93,13 @@ final class TaskStore {
         isDiscovering = true
         defer { isDiscovering = false }
         await perform {
-            self.discovered = try await NtnCLISource.discover(cli: try self.cli())
+            self.discovered = try await NotionSource.discover(transport: try self.transport())
         }
     }
 
     func createDatabase() async {
         await perform {
-            let config = try await NtnCLISource.bootstrap(cli: try self.cli())
+            let config = try await NotionSource.bootstrap(transport: try self.transport())
             self.setConfig(config)
         }
         await refresh()
@@ -117,7 +139,7 @@ final class TaskStore {
     }
 
     func refresh() async {
-        guard config != nil, !isSyncing else { return }
+        guard config != nil, hasCredentials, !isSyncing else { return }
         isSyncing = true
         defer { isSyncing = false }
         now = .now

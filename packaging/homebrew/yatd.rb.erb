@@ -1,0 +1,24 @@
+cask "yatd" do
+  version "<%= version %>"
+  sha256 "<%= sha256 %>"
+
+  url "https://github.com/<%= repository %>/releases/download/v#{version}/YATD-#{version}.zip"
+  name "YATD"
+  desc "Floating top-3 todo panel backed by Notion"
+  homepage "https://github.com/<%= repository %>"
+
+  depends_on macos: :sequoia
+
+  app "YATD.app"
+
+  zap trash: [
+    "~/Library/Application Support/YATD",
+    "~/Library/Preferences/com.shonenada.yatd.plist",
+  ]
+
+  caveats <<~EOS
+    YATD reads your tasks from Notion through the Notion CLI:
+      ntn login
+    Or set an integration token in YATD → Settings → Notion.
+  EOS
+end

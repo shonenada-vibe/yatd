@@ -8,6 +8,12 @@ A macOS menu bar app that shows your **top 3 tasks for today** from a Notion dat
 - [`ntn`](https://developers.notion.com) (Notion CLI), logged in: `ntn login`, or a Notion integration token (see below)
 - Xcode + `xcodegen` (`brew install xcodegen`) to build
 
+## Install
+
+```sh
+brew install --cask shonenada/tap/yatd
+```
+
 ## Build & run
 
 ```sh
@@ -58,12 +64,19 @@ just distribute [build]        # send an uploaded build to the external "Public"
 
 The app record must exist in App Store Connect first (＋ → New App → macOS, bundle ID `com.shonenada.yatd`). The API can't create it.
 
-**Direct download** (Developer ID, notarized):
+**Homebrew** (Developer ID, notarized):
 
 ```sh
 just sync-certs                # once: create/fetch the Developer ID certificate via match
-just release                   # build → sign → notarize → staple → build/release/YATD-<ver>-<n>.zip, tag build-<n>
-just publish                   # upload that zip to a GitHub release (draft by default)
+just release                   # build → sign → notarize → staple → build/release/YATD-<version>.zip, tag v<version>
+just publish                   # push the tag, attach the zip to the v<version> GitHub release
+just tap                       # open a PR on shonenada/homebrew-tap updating Casks/yatd.rb
+```
+
+Each release needs a new `MARKETING_VERSION` in `project.yml`. `just tap` hashes the zip users will actually download, renders `packaging/homebrew/yatd.rb.erb`, refreshes the tap README and opens the PR. Once it's merged:
+
+```sh
+brew install --cask shonenada/tap/yatd
 ```
 
 The version comes from `MARKETING_VERSION` in `project.yml`; the build number defaults to the git commit count. Regenerate the icon with `swift scripts/make-icon.swift`.

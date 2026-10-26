@@ -99,10 +99,14 @@ distribute build="":
 sync-certs:
     bundle exec fastlane mac sync_certificates
 
-# Build, sign, notarize and zip into build/release; tags build-<n>.
+# Build, sign, notarize and zip into build/release/YATD-<version>.zip; tags v<version>.
 release:
     bundle exec fastlane mac release
 
-# Upload the last release zip to a GitHub release (draft by default).
+# Upload YATD-<version>.zip to the v<version> GitHub release.
 publish:
     bundle exec fastlane mac publish
+
+# Open a PR on the Homebrew tap updating Casks/yatd.rb to the published release.
+tap:
+    bundle exec fastlane mac tap

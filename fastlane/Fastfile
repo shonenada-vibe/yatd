@@ -1,10 +1,14 @@
+require 'digest'
+require 'erb'
 require 'fileutils'
+require 'tmpdir'
 
 default_platform(:mac)
 
 # Two ways to ship:
 # - `release`: the regular build (unsandboxed, uses the `ntn` CLI), Developer ID signed,
-#   notarized and zipped, optionally attached to a GitHub release.
+#   notarized and zipped as YATD-<version>.zip, tagged v<version>; `publish` attaches it to a
+#   GitHub release and `tap` opens a PR updating the Homebrew cask.
 # - `beta`: the sandboxed `AppStore` configuration (talks to Notion over HTTPS with an
 #   integration token), uploaded to TestFlight.
 APP_IDENTIFIER = 'com.shonenada.yatd'
@@ -21,6 +25,9 @@ CHANGELOG_COMMITS = 10
 APP_STORE_CONFIGURATION = 'AppStore'
 APP_STORE_PROFILE = "match AppStore #{APP_IDENTIFIER} macos".freeze
 PUBLIC_TESTFLIGHT_GROUP = ENV.fetch('TESTFLIGHT_PUBLIC_GROUP', 'Public').to_s.freeze
+HOMEBREW_TAP_DIR = File.expand_path(ENV.fetch('HOMEBREW_TAP_DIR', File.join(ROOT_DIR, '..', 'homebrew-tap')))
+HOMEBREW_TAP_REPOSITORY = ENV.fetch('HOMEBREW_TAP_REPOSITORY', 'shonenada/homebrew-tap').freeze
+CASK_TEMPLATE = File.join(ROOT_DIR, 'packaging', 'homebrew', 'yatd.rb.erb')
 
 def require_env!(keys)
   missing = keys.select { |key| ENV[key].to_s.strip.empty? }
@@ -98,6 +105,33 @@ end
 
 def build_tag(number)
   "#{BUILD_TAG_PREFIX}-#{number}"
+end
+
+def version_tag(version)
+  "v#{version}"
+end
+
+def release_zip_path(version)
+  File.join(BUILD_DIR, "#{APP_NAME}-#{version}.zip")
+end
+
+# Each Homebrew release needs a new MARKETING_VERSION; fail before the slow build if it's taken.
+def ensure_version_available!(version)
+  tag = version_tag(version)
+  tagged_commit = `git rev-list -n 1 #{tag} 2>/dev/null`.strip
+  return if tagged_commit.empty? || tagged_commit == git_head_sha
+
+  UI.user_error!("#{tag} already points to #{tagged_commit}. Bump MARKETING_VERSION in project.yml.")
+end
+
+def tag_version!(version)
+  tag = version_tag(version)
+  ensure_version_available!(version)
+  if `git rev-list -n 1 #{tag} 2>/dev/null`.strip.empty?
+    sh('git', 'tag', '-a', tag, '-m', "#{APP_NAME} #{version}")
+  else
+    UI.message("Git tag already exists: #{tag}")
+  end
 end
 
 def tag_build!(number)
@@ -250,8 +284,8 @@ def build_app_bundle(number:)
 end
 
 # Zips with ditto so the stapled notarization ticket and extended attributes survive.
-def zip_app(app_path, version:, number:)
-  zip_path = File.join(BUILD_DIR, "#{APP_NAME}-#{version}-#{number}.zip")
+def zip_app(app_path, version:)
+  zip_path = release_zip_path(version)
   sh('ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', app_path, zip_path)
   zip_path
 end
@@ -356,6 +390,7 @@ platform :mac do
     version = marketing_version
     number = build_number
     UI.message("Releasing #{APP_NAME} #{version} (#{number})")
+    ensure_version_available!(version)
     sync_certificates(api_key: api_key)
 
     app_path = build_app_bundle(number: number)
@@ -366,36 +401,79 @@ platform :mac do
     )
     sh('spctl', '--assess', '--type', 'execute', '--verbose=2', app_path)
 
-    zip_path = zip_app(app_path, version: version, number: number)
-    tag_build!(number)
+    zip_path = zip_app(app_path, version: version)
+    tag_version!(version)
     UI.success("Notarized release: #{zip_path}")
 
     if ENV['GITHUB_TOKEN'].to_s.strip.empty?
       UI.message('GITHUB_TOKEN not set; skipping GitHub release. Run `fastlane mac publish` later to upload.')
     else
-      publish(zip_path: zip_path, version: version, number: number)
+      publish(zip_path: zip_path, version: version)
     end
   end
 
-  desc 'Upload a notarized zip to a GitHub release (draft unless GITHUB_RELEASE_DRAFT=0)'
+  desc 'Upload YATD-<version>.zip to the v<version> GitHub release (GITHUB_RELEASE_DRAFT=1 for a draft)'
   lane :publish do |options|
     require_env!(%w[GITHUB_TOKEN])
     version = options[:version] || marketing_version
-    number = (options[:number] || build_number).to_i
-    zip_path = options[:zip_path] || File.join(BUILD_DIR, "#{APP_NAME}-#{version}-#{number}.zip")
+    zip_path = options[:zip_path] || release_zip_path(version)
     require_file!(zip_path, 'release zip (run `fastlane mac release` first)')
 
-    tag = build_tag(number)
+    tag = version_tag(version)
     sh('git', 'push', 'origin', tag)
     set_github_release(
       repository_name: GITHUB_REPOSITORY,
       api_token: ENV.fetch('GITHUB_TOKEN'),
-      name: "#{APP_NAME} #{version} (#{number})",
+      name: "#{APP_NAME} #{version}",
       tag_name: tag,
       commitish: git_head_sha,
       description: recent_git_changelog(limit: CHANGELOG_COMMITS),
       upload_assets: [zip_path],
-      is_draft: env_bool!('GITHUB_RELEASE_DRAFT', default: true)
+      # Homebrew can't download assets from a draft, so releases are published by default.
+      is_draft: env_bool!('GITHUB_RELEASE_DRAFT', default: false)
     )
+  end
+
+  desc 'Open a PR on the Homebrew tap updating Casks/yatd.rb to the published release'
+  lane :tap do |options|
+    version = options[:version] || marketing_version
+    url = "https://github.com/#{GITHUB_REPOSITORY}/releases/download/#{version_tag(version)}/#{APP_NAME}-#{version}.zip"
+
+    # Hash what users will actually download, and check it matches the local build if we have it.
+    sha256 = Dir.mktmpdir do |dir|
+      downloaded = File.join(dir, 'release.zip')
+      sh('curl', '--fail', '--silent', '--show-error', '--location', '--output', downloaded, url)
+      Digest::SHA256.file(downloaded).hexdigest
+    end
+    local_zip = release_zip_path(version)
+    if File.exist?(local_zip) && Digest::SHA256.file(local_zip).hexdigest != sha256
+      UI.user_error!("#{url} doesn't match #{local_zip}. Was the release re-uploaded?")
+    end
+
+    require_file!(File.join(HOMEBREW_TAP_DIR, 'Casks'), 'Homebrew tap checkout (set HOMEBREW_TAP_DIR)')
+    tap_status = Dir.chdir(HOMEBREW_TAP_DIR) { `git status --porcelain`.strip }
+    UI.user_error!("Homebrew tap has uncommitted changes:\n#{tap_status}") unless tap_status.empty?
+
+    repository = GITHUB_REPOSITORY
+    cask = ERB.new(File.read(CASK_TEMPLATE), trim_mode: '-').result(binding)
+    branch = "automation/update-yatd-#{version_tag(version)}"
+    title = "Update yatd cask to #{version_tag(version)}"
+
+    Dir.chdir(HOMEBREW_TAP_DIR) do
+      sh('git', 'checkout', 'main')
+      sh('git', 'pull', '--ff-only', 'origin', 'main')
+      sh('git', 'checkout', '-B', branch)
+      File.write('Casks/yatd.rb', cask)
+      sh('ruby', 'scripts/update-readme.rb')
+      sh('brew', 'style', 'Casks/yatd.rb') if system('command -v brew >/dev/null')
+      sh('git', 'add', 'Casks/yatd.rb', 'README.md')
+      sh('git', 'commit', '-m', title)
+      sh('git', 'push', '--force-with-lease', '-u', 'origin', branch)
+      sh('gh', 'pr', 'create', '--repo', HOMEBREW_TAP_REPOSITORY, '--base', 'main', '--head', branch,
+         '--title', title,
+         '--body', "Update `Casks/yatd.rb` to `#{version_tag(version)}` (sha256 `#{sha256}`).\n\n" \
+                   "Generated by `just tap` in #{GITHUB_REPOSITORY}.")
+      sh('git', 'checkout', 'main')
+    end
   end
 end

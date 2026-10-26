@@ -69,7 +69,15 @@ Build, sign, notarize and zip a release; tags the commit and optionally publishe
 [bundle exec] fastlane mac publish
 ```
 
-Upload a notarized zip to a GitHub release (draft unless GITHUB_RELEASE_DRAFT=0)
+Upload YATD-<version>.zip to the v<version> GitHub release (GITHUB_RELEASE_DRAFT=1 for a draft)
+
+### mac tap
+
+```sh
+[bundle exec] fastlane mac tap
+```
+
+Open a PR on the Homebrew tap updating Casks/yatd.rb to the published release
 
 ----
 

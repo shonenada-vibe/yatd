@@ -6,3 +6,14 @@ DerivedData/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 YATDCore/.swiftpm/
 YATD.xcodeproj/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output
+vendor/bundle
+.bundle/
+
+# Secrets
+.env
+*.p8

@@ -1,6 +1,6 @@
 APP := build/Build/Products/Release/YATD.app
 
-.PHONY: project build run test test-live install clean
+.PHONY: project build run test test-live install clean sync-certs release publish
 
 project:
 	xcodegen generate
@@ -27,3 +27,17 @@ install: build
 
 clean:
 	rm -rf build YATD.xcodeproj
+
+# --- Release (fastlane; see .env.example) ---
+
+# Sync the Developer ID certificate via fastlane match.
+sync-certs:
+	bundle exec fastlane mac sync_certificates
+
+# Build, sign, notarize and zip into build/release; tags build-<n>.
+release:
+	bundle exec fastlane mac release
+
+# Upload the last release zip to a GitHub release.
+publish:
+	bundle exec fastlane mac publish

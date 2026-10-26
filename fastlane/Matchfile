@@ -1,0 +1,10 @@
+git_url(ENV["MATCH_GIT_URL"])
+storage_mode("git")
+# YATD runs the `ntn` CLI as a subprocess, so it can't be sandboxed and can't ship
+# through the Mac App Store. It's distributed outside the store: Developer ID + notarization.
+type("developer_id")
+platform("macos")
+app_identifier([
+  "com.shonenada.yatd"
+])
+team_id(ENV["TEAM_ID"] || "H2CJGWVMU4")

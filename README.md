@@ -31,6 +31,20 @@ On first launch, click **Create “YATD” page in Notion**, or paste an existin
 
 Databases created by older versions get `Started`/`Finished` added automatically on the next sync.
 
+## Releasing
+
+YATD runs `ntn` as a subprocess, so it can't be sandboxed, and the Mac App Store and TestFlight are off the table. Releases are **Developer ID signed and notarized** with fastlane:
+
+```sh
+bundle install                 # once; fastlane goes to vendor/bundle
+cp .env.example .env           # fill in ASC key, match repo, optional GITHUB_TOKEN
+make sync-certs                # once: create/fetch the Developer ID certificate via match
+make release                   # build → sign → notarize → staple → build/release/YATD-<ver>-<n>.zip, tag build-<n>
+make publish                   # upload that zip to a GitHub release (draft by default)
+```
+
+The version comes from `MARKETING_VERSION` in `project.yml`; the build number defaults to the git commit count.
+
 ## How the top 3 is picked
 
 Open tasks are ranked by bucket, then priority, then Order, then creation time:

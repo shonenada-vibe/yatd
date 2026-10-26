@@ -1,0 +1,7 @@
+app_identifier("com.shonenada.yatd")
+apple_id(ENV["APPLE_ID"])
+team_id(ENV["TEAM_ID"] || "H2CJGWVMU4")
+
+for_platform :mac do
+  app_identifier("com.shonenada.yatd")
+end

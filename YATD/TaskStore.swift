@@ -15,9 +15,14 @@ final class TaskStore {
     /// Re-read every minute so "now" buckets and the timeline move along.
     private(set) var now = Date.now
     private(set) var config: SourceConfig?
+    /// YATD databases found in the workspace, for the setup screen. `nil` until searched.
+    private(set) var discovered: [DiscoveredDatabase]?
+    private(set) var isDiscovering = false
 
-    /// IDs whose done-state change hasn't reached Notion yet; refreshes must not undo them.
-    private var pending: [String: Bool] = [:]
+    /// Edits that haven't reached Notion yet; refreshes re-apply them so the UI doesn't flicker back.
+    private var pending: [String: [TaskChange]] = [:]
+    /// Whether the connected database has been checked for the Started/Finished properties.
+    private var schemaChecked = false
     private var loop: Task<Void, Never>?
 
     var planner: Planner {
@@ -56,6 +61,20 @@ final class TaskStore {
         await refresh()
     }
 
+    func connect(_ found: DiscoveredDatabase) async {
+        setConfig(found.config)
+        await refresh()
+    }
+
+    /// Looks for an existing YATD database so a second Mac reuses it instead of creating another.
+    func discover() async {
+        isDiscovering = true
+        defer { isDiscovering = false }
+        await perform {
+            self.discovered = try await NtnCLISource.discover(cli: try self.cli())
+        }
+    }
+
     func createDatabase() async {
         await perform {
             let config = try await NtnCLISource.bootstrap(cli: try self.cli())
@@ -67,6 +86,7 @@ final class TaskStore {
     private func setConfig(_ config: SourceConfig) {
         Pref.sourceConfig = config
         self.config = config
+        schemaChecked = false
         open = []
         doneToday = []
         saveCache()
@@ -104,6 +124,10 @@ final class TaskStore {
         await perform {
             let source = try self.source()
             let planner = self.planner
+            if !self.schemaChecked {
+                try await source.ensureSchema()
+                self.schemaChecked = true
+            }
             async let openTasks = source.fetchOpen()
             async let doneTasks = source.fetchDone(on: planner.today(.now))
             var fetched = try await openTasks
@@ -111,8 +135,14 @@ final class TaskStore {
 
             // Daily schedule: recurring tasks left undone on a past day move to today.
             for (task, newDate) in planner.rollovers(fetched, now: .now) {
-                try await source.setDate(task.id, newDate)
+                try await source.update(task.id, [.date(newDate)])
                 if let i = fetched.firstIndex(where: { $0.id == task.id }) { fetched[i].date = newDate }
+            }
+
+            // Two Macs completing the same recurring task at once can each create the next copy.
+            for dup in planner.duplicates(fetched) {
+                try await source.trash(dup.id)
+                fetched.removeAll { $0.id == dup.id }
             }
 
             self.apply(open: fetched, done: done)
@@ -124,49 +154,54 @@ final class TaskStore {
     }
 
     private func apply(open fetched: [TodoTask], done: [TodoTask]) {
-        var open = fetched, done = done
-        for (id, isDone) in pending {
-            if isDone, let i = open.firstIndex(where: { $0.id == id }) {
-                var t = open.remove(at: i); t.done = true; done.append(t)
-            } else if !isDone, let i = done.firstIndex(where: { $0.id == id }) {
-                var t = done.remove(at: i); t.done = false; open.append(t)
-            }
+        var all = fetched + done
+        for (id, changes) in pending {
+            if let i = all.firstIndex(where: { $0.id == id }) { all[i] = all[i].applying(changes) }
         }
-        self.open = open
-        self.doneToday = done
+        open = all.filter { !$0.done }
+        doneToday = all.filter(\.done)
     }
 
     // MARK: Edits
 
-    func complete(_ task: TodoTask) {
-        guard !task.id.hasPrefix("local-"), let i = open.firstIndex(where: { $0.id == task.id }) else { return }
-        var t = open.remove(at: i)
-        t.done = true
-        doneToday.append(t)
-        pending[t.id] = true
-        let next = planner.nextInstance(after: t, now: .now)
+    func start(_ task: TodoTask) {
+        edit(task, task.startChanges(now: .now))
+    }
 
-        Task {
-            await perform {
-                let source = try self.source()
-                try await source.setDone(t.id, true)
-                if let next { self.open.append(try await source.create(next)) }
+    func complete(_ task: TodoTask) {
+        let next = planner.nextInstance(after: task, now: .now)
+        edit(task, task.completeChanges(now: .now)) { source in
+            guard let next else { return }
+            // Another Mac may have completed this task and created the next copy already.
+            let existing = try await source.openTasks(titled: next.title)
+            if !self.planner.alreadyScheduled(next, in: existing) {
+                self.open.append(try await source.create(next))
             }
-            pending[t.id] = nil
-            if error != nil { await refresh() }
-            saveCache()
         }
     }
 
     func reopen(_ task: TodoTask) {
-        guard let i = doneToday.firstIndex(where: { $0.id == task.id }) else { return }
-        var t = doneToday.remove(at: i)
-        t.done = false
-        open.append(t)
-        pending[t.id] = false
+        edit(task, task.reopenChanges())
+    }
+
+    /// Applies `changes` locally at once, then writes them to Notion.
+    private func edit(_ task: TodoTask, _ changes: [TaskChange],
+                      then followUp: (@MainActor (any TaskSource) async throws -> Void)? = nil) {
+        guard !changes.isEmpty, !task.id.hasPrefix("local-") else { return }
+        let all = open + doneToday
+        guard let current = all.first(where: { $0.id == task.id }) else { return }
+        let updated = current.applying(changes)
+        open = open.filter { $0.id != task.id } + (updated.done ? [] : [updated])
+        doneToday = doneToday.filter { $0.id != task.id } + (updated.done ? [updated] : [])
+        pending[task.id, default: []] += changes
+
         Task {
-            await perform { try await self.source().setDone(t.id, false) }
-            pending[t.id] = nil
+            await perform {
+                let source = try self.source()
+                try await source.update(task.id, changes)
+                try await followUp?(source)
+            }
+            pending[task.id] = nil
             if error != nil { await refresh() }
             saveCache()
         }

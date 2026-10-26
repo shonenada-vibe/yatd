@@ -26,10 +26,17 @@ struct LiveNtnTests {
 
         #expect(try await source.fetchOpen().contains { $0.id == created.id })
 
-        try await source.setDone(created.id, true)
+        try await source.ensureSchema()
+        try await source.update(created.id, created.completeChanges(now: .now))
         let next = try #require(planner.nextInstance(after: created, now: .now))
+        #expect(!planner.alreadyScheduled(next, in: try await source.openTasks(titled: next.title)))
         let nextCreated = try await source.create(next)
         cleanup.append(nextCreated.id)
+        // A second Mac completing the same task now sees the copy and doesn't create another.
+        #expect(planner.alreadyScheduled(next, in: try await source.openTasks(titled: next.title)))
+
+        let discovered = try await NtnCLISource.discover(cli: cli)
+        #expect(discovered.contains { $0.config.dataSourceID == ds })
 
         #expect(try await source.fetchDone(on: today).contains { $0.id == created.id })
         let open = try await source.fetchOpen()

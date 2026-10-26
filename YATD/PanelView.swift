@@ -124,13 +124,24 @@ struct TaskRow: View {
                 }
             }
             Spacer(minLength: 0)
+            if canStart {
+                Button { store.start(task) } label: {
+                    Image(systemName: "play.circle")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Start: records the start time in Notion")
+            }
         }
         .contentShape(Rectangle())
         .contextMenu {
+            if canStart { Button("Start") { store.start(task) } }
             if let url = task.url { Link("Open in Notion", destination: url) }
         }
         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
     }
+
+    private var canStart: Bool { !task.startChanges(now: store.now).isEmpty }
 
     private var priorityColor: Color {
         switch task.priority {
@@ -142,7 +153,9 @@ struct TaskRow: View {
 
     private var detail: String? {
         var parts: [String] = []
-        if let d = task.date {
+        if let tracked = tracking {
+            parts.append(tracked)
+        } else if let d = task.date {
             if bucket == .overdue {
                 parts.append("Overdue · \(d.start.formatted(.dateTime.month(.abbreviated).day()))")
             } else if d.hasTime {
@@ -152,6 +165,26 @@ struct TaskRow: View {
         if let r = task.repeat { parts.append("↻ \(r.rawValue)") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
+
+    /// "▶ 10:12 · 25m" while running, "10:12–10:40 · 28m" once finished.
+    private var tracking: String? {
+        let time = { (d: Date) in d.formatted(date: .omitted, time: .shortened) }
+        switch (task.startedAt, task.finishedAt) {
+        case let (start?, end?) where task.done:
+            return "\(time(start))–\(time(end)) · \(duration(end.timeIntervalSince(start)))"
+        case let (nil, end?) where task.done:
+            return "Finished \(time(end))"
+        case let (start?, _) where !task.done:
+            return "▶ \(time(start)) · \(duration(store.now.timeIntervalSince(start)))"
+        default:
+            return nil
+        }
+    }
+}
+
+private func duration(_ seconds: TimeInterval) -> String {
+    let minutes = max(0, Int(seconds / 60))
+    return minutes < 60 ? "\(minutes)m" : "\(minutes / 60)h \(minutes % 60)m"
 }
 
 func timeRange(_ d: TaskDate) -> String {
@@ -221,8 +254,27 @@ struct SetupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Connect a Notion database").font(.subheadline.bold())
-            Button("Create “YATD” page in Notion") {
-                Task { await store.createDatabase() }
+            if store.isDiscovering {
+                ProgressView("Looking for an existing YATD database…").controlSize(.small)
+            } else if let found = store.discovered {
+                if !found.isEmpty {
+                    Text("Found in your workspace:").font(.caption).foregroundStyle(.secondary)
+                    ForEach(found) { db in
+                        Button {
+                            Task { await store.connect(db) }
+                        } label: {
+                            Label(db.title, systemImage: "checklist")
+                        }
+                        .help(db.lastEdited.map { "Edited \($0.formatted(.relative(presentation: .named)))" } ?? "")
+                    }
+                    Divider()
+                }
+                Button(found.isEmpty ? "Create “YATD” page in Notion" : "Create a new one instead") {
+                    Task { await store.createDatabase() }
+                }
+            } else {
+                // Search failed (error shown below): don't offer Create, it could duplicate.
+                Button("Search again") { Task { await store.discover() } }
             }
             Text("or paste a database URL:").font(.caption).foregroundStyle(.secondary)
             HStack {
@@ -232,6 +284,7 @@ struct SetupView: View {
                     .disabled(input.isEmpty)
             }
         }
+        .task { await store.discover() }
     }
 }
 

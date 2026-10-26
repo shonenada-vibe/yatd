@@ -41,8 +41,14 @@ public struct TodoTask: Codable, Sendable, Identifiable, Equatable {
     public var priority: Priority?
     public var `repeat`: Repeat?
     public var order: Double?
+    /// When work on a one-time task began / it was completed. Not recorded for recurring tasks.
+    public var startedAt: Date?
+    public var finishedAt: Date?
     public var createdTime: Date
     public var url: URL?
+
+    /// One-time tasks get start/finish times recorded.
+    public var tracksTime: Bool { `repeat` == nil }
 
     public init(
         id: String,
@@ -52,6 +58,8 @@ public struct TodoTask: Codable, Sendable, Identifiable, Equatable {
         priority: Priority? = nil,
         repeat: Repeat? = nil,
         order: Double? = nil,
+        startedAt: Date? = nil,
+        finishedAt: Date? = nil,
         createdTime: Date = .now,
         url: URL? = nil
     ) {
@@ -62,6 +70,8 @@ public struct TodoTask: Codable, Sendable, Identifiable, Equatable {
         self.priority = priority
         self.repeat = `repeat`
         self.order = order
+        self.startedAt = startedAt
+        self.finishedAt = finishedAt
         self.createdTime = createdTime
         self.url = url
     }
@@ -75,6 +85,24 @@ public enum Schema {
     public static let priority = "Priority"
     public static let `repeat` = "Repeat"
     public static let order = "Order"
+    public static let started = "Started"
+    public static let finished = "Finished"
+
+    /// Properties added after the first release; `ensureSchema` adds any that an older database lacks.
+    public static var addedProperties: [String: [String: Any]] {
+        [
+            started: ["date": [String: Any]()],
+            finished: ["date": [String: Any]()],
+        ]
+    }
+
+    /// Whether a data source's property schema looks like a YATD database.
+    public static func matches(properties: [String: Any]) -> Bool {
+        let required = [name: "title", done: "checkbox", date: "date", `repeat`: "select"]
+        return required.allSatisfy { key, type in
+            (properties[key] as? [String: Any])?["type"] as? String == type
+        }
+    }
 
     /// Body for `POST /v1/databases`, creating an inline "Tasks" database under `pageID`.
     public static func createDatabaseBody(parentPageID: String) -> [String: Any] {
@@ -97,6 +125,8 @@ public enum Schema {
                         ["name": "Weekdays", "color": "purple"],
                     ]]],
                     order: ["number": ["format": "number"]],
+                    started: ["date": [String: Any]()],
+                    finished: ["date": [String: Any]()],
                 ] as [String: Any],
             ],
         ]

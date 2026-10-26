@@ -28,6 +28,17 @@ public struct NtnCLISource: TaskSource {
         return tasks.filter { $0.date.map { calendar.isDate($0.start, inSameDayAs: day) } ?? false }
     }
 
+    public func openTasks(titled title: String) async throws -> [TodoTask] {
+        try await query(filter: ["and": [
+            ["property": Schema.name, "title": ["equals": title]],
+            ["property": Schema.done, "checkbox": ["equals": false]],
+        ]])
+    }
+
+    public func trash(_ id: String) async throws {
+        _ = try await cli.api("/v1/pages/\(id)", method: "PATCH", body: ["in_trash": true])
+    }
+
     private func query(filter: [String: Any]) async throws -> [TodoTask] {
         var all: [TodoTask] = []
         var cursor: String?
@@ -54,14 +65,20 @@ public struct NtnCLISource: TaskSource {
         return created
     }
 
-    public func setDone(_ id: String, _ done: Bool) async throws {
+    public func update(_ id: String, _ changes: [TaskChange]) async throws {
+        guard !changes.isEmpty else { return }
         _ = try await cli.api("/v1/pages/\(id)", method: "PATCH",
-                              body: ["properties": [Schema.done: ["checkbox": done]]])
+                              body: ["properties": NotionCoding.properties(for: changes, calendar: calendar)])
     }
 
-    public func setDate(_ id: String, _ date: TaskDate?) async throws {
-        _ = try await cli.api("/v1/pages/\(id)", method: "PATCH",
-                              body: ["properties": [Schema.date: NotionCoding.dateProperty(date, calendar: calendar)]])
+    public func ensureSchema() async throws {
+        let data = try await cli.api("/v1/data_sources/\(dataSourceID)", method: "GET")
+        guard let ds = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let existing = ds["properties"] as? [String: Any]
+        else { throw NotionError.unexpectedResponse(String(decoding: data, as: UTF8.self)) }
+        let missing = Schema.addedProperties.filter { existing[$0.key] == nil }
+        guard !missing.isEmpty else { return }
+        _ = try await cli.api("/v1/data_sources/\(dataSourceID)", method: "PATCH", body: ["properties": missing])
     }
 
     // MARK: Setup
@@ -84,6 +101,36 @@ public struct NtnCLISource: TaskSource {
         else { throw NotionError.unexpectedResponse(String(decoding: dbData, as: UTF8.self)) }
 
         return SourceConfig(dataSourceID: dsID, pageURL: (page["url"] as? String).flatMap(URL.init(string:)))
+    }
+
+    /// Finds databases in the workspace with the YATD schema, most recently edited first.
+    public static func discover(cli: NtnCLI) async throws -> [DiscoveredDatabase] {
+        var found: [DiscoveredDatabase] = []
+        var cursor: String?
+        repeat {
+            var body: [String: Any] = ["filter": ["property": "object", "value": "data_source"], "page_size": 100]
+            if let cursor { body["start_cursor"] = cursor }
+            let data = try await cli.api("/v1/search", method: "POST", body: body)
+            guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let results = root["results"] as? [[String: Any]]
+            else { throw NotionError.unexpectedResponse(String(decoding: data, as: UTF8.self)) }
+            for ds in results {
+                guard let id = ds["id"] as? String,
+                      ds["in_trash"] as? Bool != true,
+                      let props = ds["properties"] as? [String: Any],
+                      Schema.matches(properties: props)
+                else { continue }
+                let title = (ds["title"] as? [[String: Any]] ?? []).compactMap { $0["plain_text"] as? String }.joined()
+                let edited = (ds["last_edited_time"] as? String).flatMap { NotionCoding.parseDate($0, calendar: .current)?.date }
+                found.append(DiscoveredDatabase(
+                    config: SourceConfig(dataSourceID: id, pageURL: (ds["url"] as? String).flatMap(URL.init(string:))),
+                    title: title.isEmpty ? "Untitled" : title,
+                    lastEdited: edited
+                ))
+            }
+            cursor = (root["has_more"] as? Bool == true) ? root["next_cursor"] as? String : nil
+        } while cursor != nil
+        return found.sorted { ($0.lastEdited ?? .distantPast) > ($1.lastEdited ?? .distantPast) }
     }
 
     /// Accepts a data source ID, database ID or URL to either, and returns the data source ID.

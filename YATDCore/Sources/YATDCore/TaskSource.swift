@@ -6,9 +6,36 @@ public protocol TaskSource: Sendable {
     func fetchOpen() async throws -> [TodoTask]
     /// Done tasks dated today, for progress and the timeline.
     func fetchDone(on day: Date) async throws -> [TodoTask]
+    /// Open tasks with exactly this title, fetched fresh (another Mac may have just created one).
+    func openTasks(titled title: String) async throws -> [TodoTask]
     func create(_ task: TodoTask) async throws -> TodoTask
-    func setDone(_ id: String, _ done: Bool) async throws
-    func setDate(_ id: String, _ date: TaskDate?) async throws
+    /// Moves a task to Notion's trash (recoverable there for 30 days).
+    func trash(_ id: String) async throws
+    /// Applies all `changes` to one task in a single write.
+    func update(_ id: String, _ changes: [TaskChange]) async throws
+    /// Adds properties that newer versions of YATD need to an existing database.
+    func ensureSchema() async throws
+}
+
+public enum TaskChange: Sendable, Equatable {
+    case done(Bool)
+    case date(TaskDate?)
+    case startedAt(Date?)
+    case finishedAt(Date?)
+}
+
+/// A YATD-shaped database found in the workspace.
+public struct DiscoveredDatabase: Sendable, Identifiable, Equatable {
+    public var config: SourceConfig
+    public var title: String
+    public var lastEdited: Date?
+    public var id: String { config.dataSourceID }
+
+    public init(config: SourceConfig, title: String, lastEdited: Date?) {
+        self.config = config
+        self.title = title
+        self.lastEdited = lastEdited
+    }
 }
 
 /// The data source being used, as stored in settings.

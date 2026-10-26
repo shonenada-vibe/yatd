@@ -150,3 +150,78 @@ private func timed(_ s: Date, _ e: Date? = nil) -> TaskDate { TaskDate(start: s,
         #expect(QuickAdd.parse("  !h  ", today: today, calendar: cal) == nil)
     }
 }
+
+@Suite struct TimeTrackingTests {
+    let now = at(2026, 10, 26, 9, 30)
+
+    @Test func oneTimeTaskRecordsStartAndFinish() {
+        let t = task("write", allDay(at(2026, 10, 26)))
+        #expect(t.startChanges(now: now) == [.startedAt(now)])
+        let started = t.applying(t.startChanges(now: now))
+        #expect(started.startChanges(now: now).isEmpty) // only once
+        let end = at(2026, 10, 26, 10, 5)
+        #expect(started.completeChanges(now: end) == [.done(true), .finishedAt(end)])
+        let done = started.applying(started.completeChanges(now: end))
+        #expect(done.startedAt == now && done.finishedAt == end && done.done)
+        #expect(done.reopenChanges() == [.done(false), .finishedAt(nil)])
+        #expect(done.applying(done.reopenChanges()).startedAt == now)
+    }
+
+    @Test func recurringTasksRecordNothing() {
+        let t = task("read", allDay(at(2026, 10, 26)), repeat: .daily)
+        #expect(t.startChanges(now: now).isEmpty)
+        #expect(t.completeChanges(now: now) == [.done(true)])
+        #expect(t.reopenChanges() == [.done(false)])
+    }
+
+    @Test func startedTasksRankFirst() {
+        var started = task("started", allDay(at(2026, 10, 27)))
+        started.startedAt = at(2026, 10, 26, 9)
+        let tasks = [task("standup", timed(at(2026, 10, 26, 10))), started]
+        #expect(Planner(calendar: cal).top(tasks, now: now).map(\.id) == ["started", "standup"])
+    }
+
+    @Test func encodesChanges() {
+        let p = NotionCoding.properties(for: [.done(true), .startedAt(at(2026, 10, 26, 9)), .finishedAt(nil)], calendar: cal)
+        #expect((p[Schema.done] as? [String: Bool]) == ["checkbox": true])
+        #expect(((p[Schema.started] as? [String: Any])?["date"] as? [String: String]) == ["start": "2026-10-26T09:00:00+08:00"])
+        #expect((p[Schema.finished] as? [String: Any])?["date"] is NSNull)
+    }
+}
+
+@Suite struct MultiMacTests {
+    let planner = Planner(calendar: cal)
+
+    private func copy(_ id: String, _ date: TaskDate, created: Date, repeat rule: Repeat? = .daily) -> TodoTask {
+        TodoTask(id: id, title: "read", date: date, repeat: rule, createdTime: created)
+    }
+
+    @Test func detectsNextCopyAlreadyCreated() {
+        let next = TodoTask(id: "", title: "read", date: allDay(at(2026, 10, 27)), repeat: .daily)
+        #expect(planner.alreadyScheduled(next, in: [copy("a", allDay(at(2026, 10, 27)), created: .now)]))
+        #expect(!planner.alreadyScheduled(next, in: [copy("a", allDay(at(2026, 10, 28)), created: .now)]))
+        #expect(!planner.alreadyScheduled(next, in: [copy("a", allDay(at(2026, 10, 27)), created: .now, repeat: nil)]))
+    }
+
+    @Test func trashesNewerDuplicatesOnly() {
+        let day = allDay(at(2026, 10, 27))
+        let tasks = [
+            copy("newer", day, created: at(2026, 10, 26, 9, 1)),
+            copy("older", day, created: at(2026, 10, 26, 9, 0)),
+            copy("other-day", allDay(at(2026, 10, 28)), created: at(2026, 10, 26, 9, 2)),
+            copy("one-time", day, created: at(2026, 10, 26, 9, 3), repeat: nil),
+            copy("one-time-2", day, created: at(2026, 10, 26, 9, 4), repeat: nil),
+        ]
+        #expect(planner.duplicates(tasks).map(\.id) == ["newer"])
+    }
+
+    @Test func recognisesYATDSchema() {
+        func prop(_ type: String) -> [String: Any] { ["type": type] }
+        let yatd: [String: Any] = ["Name": prop("title"), "Done": prop("checkbox"), "Date": prop("date"),
+                                   "Repeat": prop("select"), "Extra": prop("number")]
+        #expect(Schema.matches(properties: yatd))
+        var wrong = yatd
+        wrong["Done"] = prop("status")
+        #expect(!Schema.matches(properties: wrong))
+    }
+}

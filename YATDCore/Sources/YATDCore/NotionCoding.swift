@@ -34,10 +34,19 @@ public enum NotionCoding {
             date = TaskDate(start: start.date, end: end?.date, hasTime: start.hasTime)
         }
 
+        let startedAt = dateTime(props[Schema.started], calendar: calendar)
+        let finishedAt = dateTime(props[Schema.finished], calendar: calendar)
+
         let created = (page["created_time"] as? String).flatMap { parseDate($0, calendar: calendar)?.date } ?? .distantPast
         let url = (page["url"] as? String).flatMap(URL.init(string:))
         return TodoTask(id: id, title: title, done: done, date: date, priority: priority,
-                        repeat: rep, order: order, createdTime: created, url: url)
+                        repeat: rep, order: order, startedAt: startedAt, finishedAt: finishedAt,
+                        createdTime: created, url: url)
+    }
+
+    private static func dateTime(_ prop: Any?, calendar: Calendar) -> Date? {
+        guard let s = ((prop as? [String: Any])?["date"] as? [String: Any])?["start"] as? String else { return nil }
+        return parseDate(s, calendar: calendar)?.date
     }
 
     private static func selectName(_ prop: Any?) -> String? {
@@ -80,6 +89,11 @@ public enum NotionCoding {
         return ["date": d]
     }
 
+    /// A date-time property holding a single moment, or empty when `nil`.
+    public static func timestampProperty(_ date: Date?, calendar: Calendar = .current) -> [String: Any] {
+        dateProperty(date.map { TaskDate(start: $0, hasTime: true) }, calendar: calendar)
+    }
+
     /// Properties for creating a page in the YATD data source.
     public static func properties(for task: TodoTask, calendar: Calendar = .current) -> [String: Any] {
         var p: [String: Any] = [
@@ -90,6 +104,22 @@ public enum NotionCoding {
         if let pr = task.priority { p[Schema.priority] = ["select": ["name": pr.rawValue]] }
         if let r = task.repeat { p[Schema.repeat] = ["select": ["name": r.rawValue]] }
         if let o = task.order { p[Schema.order] = ["number": o] }
+        if task.startedAt != nil { p[Schema.started] = timestampProperty(task.startedAt, calendar: calendar) }
+        if task.finishedAt != nil { p[Schema.finished] = timestampProperty(task.finishedAt, calendar: calendar) }
+        return p
+    }
+
+    /// Properties for a `PATCH /v1/pages/{id}` applying `changes`.
+    public static func properties(for changes: [TaskChange], calendar: Calendar = .current) -> [String: Any] {
+        var p: [String: Any] = [:]
+        for change in changes {
+            switch change {
+            case .done(let done): p[Schema.done] = ["checkbox": done]
+            case .date(let date): p[Schema.date] = dateProperty(date, calendar: calendar)
+            case .startedAt(let d): p[Schema.started] = timestampProperty(d, calendar: calendar)
+            case .finishedAt(let d): p[Schema.finished] = timestampProperty(d, calendar: calendar)
+            }
+        }
         return p
     }
 

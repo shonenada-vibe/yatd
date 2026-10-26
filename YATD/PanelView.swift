@@ -9,43 +9,74 @@ struct PanelView: View {
     @Environment(TaskStore.self) private var store
     @AppStorage(Pref.alwaysOnTop) private var alwaysOnTop = true
     @AppStorage(Pref.opacity) private var opacity = 1.0
+    @AppStorage(Pref.clearGlass) private var clearGlass = false
     @AppStorage("panelTab") private var tab = PanelTab.top
+    @Namespace private var glass
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
-            if !store.isConfigured || !store.hasCredentials {
-                SetupView()
-            } else {
-                switch tab {
-                case .top: TopTasksView()
-                case .schedule: ScheduleView()
+        // One container, so pills added or removed (a task completed, an error shown) morph
+        // instead of popping. Its blend distance is below the 10pt row gap so task cards stay
+        // separate; only the tighter header buttons melt together.
+        GlassGroup(spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
+                header
+                if !store.isConfigured || !store.hasCredentials {
+                    SetupView()
+                        .padding(14)
+                        .liquidGlass(in: .rect(cornerRadius: 22))
+                        .liquidGlassID("setup", in: glass)
+                } else {
+                    switch tab {
+                    case .top: TopTasksView(glass: glass)
+                    case .schedule: ScheduleView(glass: glass)
+                    }
+                    QuickAddField()
+                        .liquidGlassID("add", in: glass)
                 }
-                QuickAddField()
+                if let error = store.error {
+                    Text(error)
+                        .font(.caption)
+                        .lineLimit(3)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .liquidGlass(in: .rect(cornerRadius: 14), tint: .red.opacity(0.35), interactive: true)
+                        .liquidGlassID("error", in: glass)
+                        .onTapGesture { store.error = nil }
+                        .help("Click to dismiss")
+                }
             }
-            if let error = store.error {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(3)
-                    .onTapGesture { store.error = nil }
-            }
+            .animation(.smooth(duration: 0.45), value: store.top.map(\.id))
+            .animation(.smooth(duration: 0.45), value: store.error)
+            .animation(.smooth(duration: 0.45), value: tab)
         }
-        .padding(14)
-        .frame(width: 300)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        // Room for the glass shadows and morphing, which the window would otherwise clip.
+        .padding(12)
+        .frame(width: 324)
+        .environment(\.clearGlass, clearGlass)
+        // The panel never becomes key (it mustn't steal focus), and inactive windows render
+        // glass tints and accents greyed out. Draw as active so the tints keep their colour.
+        .environment(\.controlActiveState, .key)
         .opacity(opacity)
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Text("Today").font(.headline)
-            if store.isConfigured {
-                Text("\(store.doneToday.count)/\(store.doneToday.count + store.rankedCount)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Text("Today").font(.headline)
+                if store.isConfigured {
+                    Text("\(store.doneToday.count)/\(store.doneToday.count + store.rankedCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                }
             }
-            Spacer()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .liquidGlass(in: .capsule)
+            .liquidGlassID("title", in: glass)
+
+            Spacer(minLength: 0)
+
             Picker("", selection: $tab) {
                 Image(systemName: "list.number").tag(PanelTab.top)
                 Image(systemName: "calendar.day.timeline.left").tag(PanelTab.schedule)
@@ -54,45 +85,72 @@ struct PanelView: View {
             .labelsHidden()
             .fixedSize()
             .help("Top 3 / Schedule")
-            Button {
-                Task { await store.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .symbolEffect(.rotate, isActive: store.isSyncing)
+            // Close enough to melt into one liquid shape.
+            HStack(spacing: 2) {
+                Button {
+                    Task { await store.refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .symbolEffect(.rotate, isActive: store.isSyncing)
+                }
+                .help(store.lastSync.map { "Synced \($0.formatted(.relative(presentation: .named)))" } ?? "Refresh")
+                Button {
+                    alwaysOnTop.toggle()
+                } label: {
+                    Image(systemName: alwaysOnTop ? "pin.fill" : "pin")
+                }
+                .help(alwaysOnTop ? "Always on top" : "Not pinned")
             }
-            .help(store.lastSync.map { "Synced \($0.formatted(.relative(presentation: .named)))" } ?? "Refresh")
-            Button {
-                alwaysOnTop.toggle()
-            } label: {
-                Image(systemName: alwaysOnTop ? "pin.fill" : "pin")
-            }
-            .help(alwaysOnTop ? "Always on top" : "Not pinned")
+            .glassIconButtonStyle()
         }
-        .buttonStyle(.borderless)
     }
 }
 
 struct TopTasksView: View {
     @Environment(TaskStore.self) private var store
+    let glass: Namespace.ID
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             if store.top.isEmpty {
                 Text(store.lastSync == nil ? "Loading…" : "All clear 🎉")
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .liquidGlass(in: .rect(cornerRadius: 18))
+                    .liquidGlassID("empty", in: glass)
             }
             ForEach(store.top) { task in
-                TaskRow(task: task, bucket: store.planner.bucket(task, now: store.now))
+                let bucket = store.planner.bucket(task, now: store.now)
+                TaskRow(task: task, bucket: bucket)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .liquidGlass(in: .rect(cornerRadius: 18), tint: bucket?.glassTint, interactive: true)
+                    .liquidGlassID(task.id, in: glass)
             }
             let more = store.rankedCount - store.top.count
             if more > 0 {
                 Text("+\(more) more today")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .liquidGlass(in: .capsule)
+                    .liquidGlassID("more", in: glass)
+                    .frame(maxWidth: .infinity)
             }
         }
-        .animation(.snappy, value: store.top.map(\.id))
+    }
+}
+
+extension Planner.Bucket {
+    /// A hint of colour in the glass: running tasks glow with the accent, overdue ones warm.
+    var glassTint: Color? {
+        switch self {
+        case .inProgress: .blue.opacity(0.7)
+        case .now: .blue.opacity(0.4)
+        case .overdue: .orange.opacity(0.6)
+        default: nil
+        }
     }
 }
 
@@ -138,7 +196,6 @@ struct TaskRow: View {
             if canStart { Button("Start") { store.start(task) } }
             if let url = task.url { Link("Open in Notion", destination: url) }
         }
-        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
     }
 
     private var canStart: Bool { !task.startChanges(now: store.now).isEmpty }
@@ -195,26 +252,32 @@ func timeRange(_ d: TaskDate) -> String {
 
 struct ScheduleView: View {
     @Environment(TaskStore.self) private var store
+    let glass: Namespace.ID
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 10) {
             if store.timeline.isEmpty {
                 Text("Nothing scheduled. Add one with @10:00")
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .liquidGlass(in: .rect(cornerRadius: 18))
+                    .liquidGlassID("empty-schedule", in: glass)
             }
             ForEach(store.timeline) { task in
-                let current = isCurrent(task)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(task.date!.start.formatted(date: .omitted, time: .shortened))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .frame(width: 58, alignment: .trailing)
+                        .frame(width: 52, alignment: .trailing)
                     TaskRow(task: task, bucket: store.planner.bucket(task, now: store.now))
                 }
-                .padding(.vertical, 2)
-                .padding(.horizontal, 4)
-                .background(current ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .liquidGlass(in: .rect(cornerRadius: 18),
+                             tint: isCurrent(task) ? .blue.opacity(0.7) : nil,
+                             interactive: true)
+                .liquidGlassID("schedule-\(task.id)", in: glass)
+                .opacity(task.done ? 0.7 : 1)
             }
         }
     }
@@ -236,8 +299,9 @@ struct QuickAddField: View {
         TextField("Add task  (@10:00  !h  *daily  ~)", text: $text)
             .textFieldStyle(.plain)
             .font(.callout)
-            .padding(6)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .liquidGlass(in: .capsule, interactive: true)
             .focused($focused)
             .onSubmit {
                 store.quickAdd(text)
@@ -269,6 +333,7 @@ struct SetupView: View {
                     TextField("https://notion.so/…", text: $input)
                         .textFieldStyle(.roundedBorder)
                     Button("Connect") { Task { await store.connect(input) } }
+                        .glassButtonStyle()
                         .disabled(input.isEmpty)
                 }
             }
@@ -290,6 +355,7 @@ struct SetupView: View {
                     } label: {
                         Label(db.title, systemImage: "checklist")
                     }
+                    .glassButtonStyle(prominent: true)
                     .help(db.lastEdited.map { "Edited \($0.formatted(.relative(presentation: .named)))" } ?? "")
                 }
                 Divider()
@@ -299,10 +365,12 @@ struct SetupView: View {
                 Button(found.isEmpty ? "Create “YATD” page in Notion" : "Create a new one instead") {
                     Task { await store.createDatabase() }
                 }
+                .glassButtonStyle(prominent: found.isEmpty)
             }
         } else {
             // Search failed (error shown below): don't offer Create, it could duplicate.
             Button("Search again") { Task { await store.discover() } }
+                .glassButtonStyle()
         }
     }
 }
@@ -325,6 +393,7 @@ struct TokenSignIn: View {
                 Button("Save") {
                     Task { await store.setConnection(.token, token: token); token = "" }
                 }
+                .glassButtonStyle(prominent: true)
                 .disabled(token.isEmpty)
             }
         }

@@ -13,6 +13,7 @@ enum Pref {
     static let reminders = "reminders"
     static let pollSeconds = "pollSeconds"
     static let connection = "connection"
+    static let clearGlass = "clearGlass"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [

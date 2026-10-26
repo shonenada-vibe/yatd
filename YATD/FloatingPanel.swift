@@ -19,7 +19,8 @@ final class FloatingPanel: NSPanel {
         becomesKeyOnlyIfNeeded = true
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        // Liquid Glass shapes cast their own shadows; a window shadow would outline the gaps.
+        if #available(macOS 26.0, *) { hasShadow = false } else { hasShadow = true }
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
 
         let host = NSHostingController(rootView: content())

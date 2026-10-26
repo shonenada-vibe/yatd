@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage(Pref.ntnPath) private var ntnPath = ""
     @AppStorage(Pref.alwaysOnTop) private var alwaysOnTop = true
     @AppStorage(Pref.opacity) private var opacity = 1.0
+    @AppStorage(Pref.clearGlass) private var clearGlass = false
     @AppStorage(Pref.dayStartHour) private var dayStartHour = 4
     @AppStorage(Pref.reminders) private var reminders = true
     @AppStorage(Pref.pollSeconds) private var pollSeconds = 60
@@ -55,6 +56,9 @@ struct SettingsView: View {
             Section("Panel") {
                 Toggle("Always on top", isOn: $alwaysOnTop)
                 Slider(value: $opacity, in: 0.4...1) { Text("Opacity") }
+                if #available(macOS 26.0, *) {
+                    Toggle("Clear glass (more see-through)", isOn: $clearGlass)
+                }
                 Text("Show/hide: ⌥⌘Y").foregroundStyle(.secondary)
             }
             Section("Daily schedule") {

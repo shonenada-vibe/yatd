@@ -6,6 +6,7 @@ import Foundation
 /// - `!h` / `!m` / `!l` (or `!1` / `!2` / `!3`): priority
 /// - `*daily` / `*weekdays`: repeat
 /// - `~` : no date (someday)
+/// - `^HH:mm`: planned start today
 /// - `#name`: add to the project whose name starts with `name` (spaces ignored)
 public enum QuickAdd {
     public static func parse(_ text: String, today: Date, calendar: Calendar = .current,
@@ -15,6 +16,7 @@ public enum QuickAdd {
         var date: TaskDate? = TaskDate(start: today, hasTime: false)
         var priority: Priority?
         var rule: Repeat?
+        var planned: Date?
 
         for token in text.split(separator: " ", omittingEmptySubsequences: true).map(String.init) {
             if token.hasPrefix("@"), let block = timeBlock(String(token.dropFirst()), on: today, calendar: calendar) {
@@ -23,6 +25,8 @@ public enum QuickAdd {
                 priority = p
             } else if token.hasPrefix("*"), let r = Repeat.allCases.first(where: { $0.rawValue.lowercased() == token.dropFirst().lowercased() }) {
                 rule = r
+            } else if token.hasPrefix("^"), let time = time(String(token.dropFirst()), on: today, calendar: calendar) {
+                planned = time
             } else if token.count > 1, token.hasPrefix("#"), let p = project(matching: String(token.dropFirst()), in: projects) {
                 projectID = p.id
             } else if token == "~" {
@@ -35,6 +39,7 @@ public enum QuickAdd {
         guard !title.isEmpty else { return nil }
         var task = TodoTask(id: "", title: title, date: date, priority: priority, repeat: rule)
         task.projectID = projectID
+        task.plannedStart = planned
         return task
     }
 

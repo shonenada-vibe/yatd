@@ -15,6 +15,7 @@ enum Pref {
     static let connection = "connection"
     static let clearGlass = "clearGlass"
     static let showInDock = "showInDock"
+    static let panelCollapsed = "panelCollapsed"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [

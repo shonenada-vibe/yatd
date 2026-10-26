@@ -11,6 +11,7 @@ struct PanelView: View {
     @AppStorage(Pref.opacity) private var opacity = 1.0
     @AppStorage(Pref.clearGlass) private var clearGlass = false
     @AppStorage("panelTab") private var tab = PanelTab.top
+    @AppStorage(Pref.panelCollapsed) private var collapsed = false
     @Namespace private var glass
 
     var body: some View {
@@ -19,19 +20,10 @@ struct PanelView: View {
         // separate; only the tighter header buttons melt together.
         GlassGroup(spacing: 8) {
             VStack(alignment: .leading, spacing: 10) {
-                header
-                if !store.isConfigured || !store.hasCredentials {
-                    SetupView()
-                        .padding(14)
-                        .liquidGlass(in: .rect(cornerRadius: 22))
-                        .liquidGlassID("setup", in: glass)
+                if collapsed {
+                    collapsedBar
                 } else {
-                    switch tab {
-                    case .top: TopTasksView(glass: glass)
-                    case .schedule: ScheduleView(glass: glass)
-                    }
-                    QuickAddField()
-                        .liquidGlassID("add", in: glass)
+                    expanded
                 }
                 if let error = store.error {
                     Text(error)
@@ -48,6 +40,7 @@ struct PanelView: View {
             .animation(.smooth(duration: 0.45), value: store.top.map(\.id))
             .animation(.smooth(duration: 0.45), value: store.error)
             .animation(.smooth(duration: 0.45), value: tab)
+            .animation(.smooth(duration: 0.45), value: collapsed)
         }
         // Room for the glass shadows and morphing, which the window would otherwise clip.
         .padding(12)
@@ -59,6 +52,53 @@ struct PanelView: View {
         .opacity(opacity)
     }
 
+    @ViewBuilder private var expanded: some View {
+                header
+                if !store.isConfigured || !store.hasCredentials {
+                    SetupView()
+                        .padding(14)
+                        .liquidGlass(in: .rect(cornerRadius: 22))
+                        .liquidGlassID("setup", in: glass)
+                } else {
+                    switch tab {
+                    case .top: TopTasksView(glass: glass)
+                    case .schedule: ScheduleView(glass: glass)
+                    }
+                    QuickAddField()
+                        .liquidGlassID("add", in: glass)
+                }
+    }
+
+    /// Minimized: the title, the task that's on top right now, and a restore button. The top
+    /// card morphs into the middle pill (same glass ID) and back.
+    private var collapsedBar: some View {
+        HStack(spacing: 6) {
+            titlePill
+            if let next = store.top.first {
+                Button { collapsed = false } label: {
+                    Text(next.title)
+                        .font(.callout)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .liquidGlass(in: .capsule, tint: store.planner.bucket(next, now: store.now)?.glassTint, interactive: true)
+                .liquidGlassID(next.id, in: glass)
+                .help("Restore")
+            } else {
+                Spacer(minLength: 0)
+            }
+            Button { collapsed = false } label: {
+                Image(systemName: "chevron.down")
+            }
+            .glassIconButtonStyle()
+            .help("Restore panel")
+        }
+    }
+
     /// "Today" with one project; otherwise the active project names.
     private var title: String {
         let active = store.activeProjects
@@ -67,29 +107,33 @@ struct PanelView: View {
         return active.count <= 2 ? active.map(\.name).joined(separator: " + ") : "\(active.count) projects"
     }
 
+    private var titlePill: some View {
+        ProjectMenu {
+            HStack(spacing: 6) {
+                Text(title).font(.headline).lineLimit(1)
+                if store.isConfigured {
+                    Text("\(store.doneToday.count)/\(store.doneToday.count + store.rankedCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                }
+                if store.projects.count > 1 {
+                    Image(systemName: store.selection == .auto ? "clock" : "chevron.down")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .liquidGlass(in: .capsule)
+        .liquidGlassID("title", in: glass)
+    }
+
     private var header: some View {
         HStack(spacing: 6) {
-            ProjectMenu {
-                HStack(spacing: 6) {
-                    Text(title).font(.headline).lineLimit(1)
-                    if store.isConfigured {
-                        Text("\(store.doneToday.count)/\(store.doneToday.count + store.rankedCount)")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .contentTransition(.numericText())
-                    }
-                    if store.projects.count > 1 {
-                        Image(systemName: store.selection == .auto ? "clock" : "chevron.down")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .contentShape(Capsule())
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .liquidGlass(in: .capsule)
-            .liquidGlassID("title", in: glass)
+            titlePill
 
             Spacer(minLength: 0)
 
@@ -116,6 +160,12 @@ struct PanelView: View {
                     Image(systemName: alwaysOnTop ? "pin.fill" : "pin")
                 }
                 .help(alwaysOnTop ? "Always on top" : "Not pinned")
+                Button {
+                    collapsed = true
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .help("Minimize panel")
             }
             .glassIconButtonStyle()
         }
@@ -194,10 +244,21 @@ struct TaskRow: View {
                 if let detail {
                     Text(detail)
                         .font(.caption)
-                        .foregroundStyle(bucket == .overdue ? .orange : .secondary)
+                        .foregroundStyle(bucket == .overdue || late ? .orange : .secondary)
                 }
             }
             Spacer(minLength: 0)
+            if !task.done {
+                Button { editingPlan = true } label: {
+                    Image(systemName: task.plannedStart == nil ? "clock" : "clock.fill")
+                        .foregroundStyle(late ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                }
+                .buttonStyle(.borderless)
+                .help(task.plannedStart == nil ? "Plan a start time" : "Change the planned start")
+                .popover(isPresented: $editingPlan, arrowEdge: .bottom) {
+                    PlanStartEditor(initial: task.plannedStart) { store.setPlannedStart(task, $0) }
+                }
+            }
             if canStart {
                 Button { store.start(task) } label: {
                     Image(systemName: "play.circle")
@@ -210,11 +271,16 @@ struct TaskRow: View {
         .contentShape(Rectangle())
         .contextMenu {
             if canStart { Button("Start") { store.start(task) } }
+            if !task.done { Button(task.plannedStart == nil ? "Plan Start Time…" : "Change Planned Start…") { editingPlan = true } }
+            if task.plannedStart != nil, !task.done { Button("Clear Planned Start") { store.setPlannedStart(task, nil) } }
             if let url = task.url { Link("Open in Notion", destination: url) }
         }
     }
 
+    @State private var editingPlan = false
+
     private var canStart: Bool { !task.startChanges(now: store.now).isEmpty }
+    private var late: Bool { store.planner.isLate(task, now: store.now) }
 
     private var priorityColor: Color {
         switch task.priority {
@@ -230,6 +296,9 @@ struct TaskRow: View {
         if store.activeProjectIDs.count > 1, let project = store.project(task.projectID) {
             parts.append(project.name)
         }
+        if let planned = task.plannedStart {
+            parts.append(planDescription(planned))
+        }
         if let tracked = tracking {
             parts.append(tracked)
         } else if let d = task.date {
@@ -243,6 +312,16 @@ struct TaskRow: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    /// "Plan 14:30", "Late · plan 14:30", or "Plan Tue 14:30" when it isn't for today.
+    private func planDescription(_ planned: Date) -> String {
+        let time = planned.formatted(date: .omitted, time: .shortened)
+        if late { return "Late · plan \(time)" }
+        if store.planner.scheduledStart(task, now: store.now) == nil {
+            return "Plan \(planned.formatted(.dateTime.weekday(.abbreviated))) \(time)"
+        }
+        return "Plan \(time)"
+    }
+
     /// "▶ 10:12 · 25m" while running, "10:12–10:40 · 28m" once finished.
     private var tracking: String? {
         let time = { (d: Date) in d.formatted(date: .omitted, time: .shortened) }
@@ -251,7 +330,7 @@ struct TaskRow: View {
             return "\(time(start))–\(time(end)) · \(duration(end.timeIntervalSince(start)))"
         case let (nil, end?) where task.done:
             return "Finished \(time(end))"
-        case let (start?, _) where !task.done:
+        case let (start?, _) where task.isRunning(at: store.now):
             return "▶ \(time(start)) · \(duration(store.now.timeIntervalSince(start)))"
         default:
             return nil
@@ -285,7 +364,7 @@ struct ScheduleView: View {
             }
             ForEach(store.timeline) { task in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(task.date!.start.formatted(date: .omitted, time: .shortened))
+                    Text((store.planner.scheduledStart(task, now: store.now) ?? .now).formatted(date: .omitted, time: .shortened))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 52, alignment: .trailing)
@@ -302,11 +381,12 @@ struct ScheduleView: View {
         }
     }
 
-    /// Active between start and end; without an end, for 30 minutes.
+    /// Active between start and end; without an end (or for a planned start), for 30 minutes.
     private func isCurrent(_ task: TodoTask) -> Bool {
-        guard let d = task.date, !task.done else { return false }
-        let end = d.end ?? d.start.addingTimeInterval(30 * 60)
-        return d.start <= store.now && store.now < end
+        guard !task.done, let start = store.planner.scheduledStart(task, now: store.now) else { return false }
+        let end = task.date?.hasTime == true ? (task.date?.end ?? start.addingTimeInterval(30 * 60))
+                                             : start.addingTimeInterval(30 * 60)
+        return start <= store.now && store.now < end
     }
 }
 
@@ -316,7 +396,7 @@ struct QuickAddField: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField("Add task  (@10:00  !h  *daily  #project)", text: $text)
+        TextField("Add task  (^14:30  @10:00  !h  *daily  #project)", text: $text)
             .textFieldStyle(.plain)
             .font(.callout)
             .padding(.horizontal, 14)
@@ -468,5 +548,52 @@ struct ProjectMenu<Label: View>: View {
         UserDefaults.standard.set(tab, forKey: "settingsTab")
         NSApp.activate()
         openSettings()
+    }
+}
+
+/// Popover for a task's planned start: a time today (or tomorrow if already past), quick picks,
+/// and Clear.
+struct PlanStartEditor: View {
+    let initial: Date?
+    let save: (Date?) -> Void
+    @State private var time: Date
+    @Environment(\.dismiss) private var dismiss
+
+    init(initial: Date?, save: @escaping (Date?) -> Void) {
+        self.initial = initial
+        self.save = save
+        // Default: the next half hour.
+        let cal = Calendar.current
+        let now = Date.now
+        let minute = cal.component(.minute, from: now)
+        let next = cal.date(byAdding: .minute, value: minute < 30 ? 30 - minute : 60 - minute, to: now) ?? now
+        _time = State(initialValue: initial ?? cal.date(bySetting: .second, value: 0, of: next) ?? next)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Planned start").font(.headline)
+            DatePicker("Time", selection: $time, displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.stepperField)
+                .labelsHidden()
+            HStack {
+                ForEach([15, 30, 60], id: \.self) { minutes in
+                    Button("+\(minutes < 60 ? "\(minutes)m" : "1h")") {
+                        time = Date.now.addingTimeInterval(TimeInterval(minutes * 60))
+                    }
+                }
+            }
+            .controlSize(.small)
+            HStack {
+                if initial != nil {
+                    Button("Clear", role: .destructive) { save(nil); dismiss() }
+                }
+                Spacer()
+                Button("Set") { save(time); dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(14)
+        .frame(width: 240)
     }
 }

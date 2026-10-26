@@ -6,7 +6,8 @@ final class FloatingPanel: NSPanel {
     init<Content: View>(@ViewBuilder content: () -> Content) {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
-            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .resizable],
+            // Not resizable: the content sets the size, and the top edge stays put (see setFrame).
+            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -42,6 +43,16 @@ final class FloatingPanel: NSPanel {
         f.origin.x = min(max(f.minX, visible.minX), visible.maxX - f.width)
         f.origin.y = min(max(f.minY, visible.minY), visible.maxY - f.height)
         if f != frame { setFrame(f, display: false) }
+    }
+
+    /// AppKit keeps the bottom edge when the height changes; keep the top edge instead, so
+    /// minimizing, restoring and tasks coming and going don't make the panel jump.
+    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        var rect = frameRect
+        if isVisible, rect.size != frame.size, rect.origin == frame.origin {
+            rect.origin.y = frame.maxY - rect.height
+        }
+        super.setFrame(rect, display: flag)
     }
 
     // Needed so the quick-add field can receive typing.

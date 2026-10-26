@@ -36,12 +36,15 @@ public enum NotionCoding {
 
         let startedAt = dateTime(props[Schema.started], calendar: calendar)
         let finishedAt = dateTime(props[Schema.finished], calendar: calendar)
+        let plannedStart = dateTime(props[Schema.plannedStart], calendar: calendar)
 
         let created = (page["created_time"] as? String).flatMap { parseDate($0, calendar: calendar)?.date } ?? .distantPast
         let url = (page["url"] as? String).flatMap(URL.init(string:))
-        return TodoTask(id: id, title: title, done: done, date: date, priority: priority,
-                        repeat: rep, order: order, startedAt: startedAt, finishedAt: finishedAt,
-                        createdTime: created, url: url)
+        var task = TodoTask(id: id, title: title, done: done, date: date, priority: priority,
+                            repeat: rep, order: order, startedAt: startedAt, finishedAt: finishedAt,
+                            createdTime: created, url: url)
+        task.plannedStart = plannedStart
+        return task
     }
 
     private static func dateTime(_ prop: Any?, calendar: Calendar) -> Date? {
@@ -106,6 +109,7 @@ public enum NotionCoding {
         if let o = task.order { p[Schema.order] = ["number": o] }
         if task.startedAt != nil { p[Schema.started] = timestampProperty(task.startedAt, calendar: calendar) }
         if task.finishedAt != nil { p[Schema.finished] = timestampProperty(task.finishedAt, calendar: calendar) }
+        if task.plannedStart != nil { p[Schema.plannedStart] = timestampProperty(task.plannedStart, calendar: calendar) }
         return p
     }
 
@@ -118,6 +122,7 @@ public enum NotionCoding {
             case .date(let date): p[Schema.date] = dateProperty(date, calendar: calendar)
             case .startedAt(let d): p[Schema.started] = timestampProperty(d, calendar: calendar)
             case .finishedAt(let d): p[Schema.finished] = timestampProperty(d, calendar: calendar)
+            case .plannedStart(let d): p[Schema.plannedStart] = timestampProperty(d, calendar: calendar)
             }
         }
         return p

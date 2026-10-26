@@ -34,8 +34,9 @@ On first launch, click **Create “YATD” page in Notion**, or paste an existin
 | Order | number | manual tie-break |
 | Started | date & time | when you pressed ▶ on a one-time task |
 | Finished | date & time | when you ticked off a one-time task |
+| Plan Start | date & time | when you intend to start; set with the clock button on a task or `^14:30` |
 
-Databases created by older versions get `Started`/`Finished` added automatically on the next sync.
+Databases created by older versions get `Started`/`Finished`/`Plan Start` added automatically on the next sync.
 
 ## Connecting to Notion
 
@@ -121,6 +122,10 @@ Tasks live in Notion; each Mac syncs every minute. On a new Mac, log in with `nt
 
 If two Macs complete the same recurring task, only one next copy is created. The app checks Notion first, and trashes any duplicate copy that slips through on the next sync.
 
+## Planned start
+
+Click the clock on a task (or right-click → Plan Start Time…) to set when you mean to start it, or type `^14:30` when adding. The card shows `Plan 14:30`, and after you start, `Plan 14:30 · ▶ 14:42`. A one-time task still not started 10 minutes after its plan shows **Late** in orange. Planned tasks rank like timed ones: they join the top group an hour before their time. They also appear on the Schedule tab and get a reminder. Repeating tasks keep the same planned time on each new day.
+
 ## Quick add
 
 Type in the panel's field (focus it from the menu bar → *Add Task…*):
@@ -131,12 +136,13 @@ Write report !m
 Someday idea ~
 ```
 
-`@HH:mm[-HH:mm]` time block · `!h/!m/!l` priority · `*daily/*weekdays` repeat · `~` no date · `#project` target project
+`^HH:mm` planned start · `@HH:mm[-HH:mm]` time block · `!h/!m/!l` priority · `*daily/*weekdays` repeat · `~` no date · `#project` target project
 
 ## Shortcuts
 
 - **⌥⌘Y**: show/hide the panel (global)
 - Pin button: toggle always-on-top
+- Chevron button: minimize the panel to one line (title and your top task); click it again to restore
 
 ## Layout
 

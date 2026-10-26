@@ -74,11 +74,20 @@ struct LiveProjectTests {
         let page = try await NotionSource.pageInfo(pageID, transport: cli)
         #expect(page.title == name && page.parentPageID == root)
 
-        let draft = try #require(QuickAdd.parse("first task #\(name)", today: Planner().today(.now), projects: [project]))
+        let draft = try #require(QuickAdd.parse("first task #\(name) ^14:30", today: Planner().today(.now), projects: [project]))
         #expect(draft.projectID == project.id)
         let created = try await source.create(draft)
         #expect(created.projectID == project.id)
-        #expect(try await source.fetchOpen().map(\.id) == [created.id])
+        #expect(created.plannedStart == draft.plannedStart)
+        let fetched = try await source.fetchOpen()
+        #expect(fetched.map(\.id) == [created.id])
+
+        // Change, then clear, the planned start.
+        let later = draft.plannedStart!.addingTimeInterval(3600)
+        try await source.update(created.id, [.plannedStart(later)])
+        #expect(try await source.fetchOpen().first?.plannedStart == later)
+        try await source.update(created.id, [.plannedStart(nil)])
+        #expect(try await source.fetchOpen().first?.plannedStart == nil)
 
         _ = try await cli.api("/v1/pages/\(pageID)", method: "PATCH", body: ["in_trash": true])
     }

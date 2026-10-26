@@ -34,6 +34,7 @@ public enum TaskChange: Sendable, Equatable {
     case date(TaskDate?)
     case startedAt(Date?)
     case finishedAt(Date?)
+    case plannedStart(Date?)
 }
 
 /// A YATD-shaped database found in the workspace.

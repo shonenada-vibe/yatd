@@ -44,6 +44,8 @@ public struct TodoTask: Codable, Sendable, Identifiable, Equatable {
     /// When work on a one-time task began / it was completed. Not recorded for recurring tasks.
     public var startedAt: Date?
     public var finishedAt: Date?
+    /// When you intend to start, separate from the due day (`date`) and the actual start.
+    public var plannedStart: Date?
     public var createdTime: Date
     public var url: URL?
     /// The project (data source) this task came from. Set locally, not stored in Notion.
@@ -89,12 +91,14 @@ public enum Schema {
     public static let order = "Order"
     public static let started = "Started"
     public static let finished = "Finished"
+    public static let plannedStart = "Plan Start"
 
     /// Properties added after the first release; `ensureSchema` adds any that an older database lacks.
     public static var addedProperties: [String: [String: Any]] {
         [
             started: ["date": [String: Any]()],
             finished: ["date": [String: Any]()],
+            plannedStart: ["date": [String: Any]()],
         ]
     }
 
@@ -129,6 +133,7 @@ public enum Schema {
                     order: ["number": ["format": "number"]],
                     started: ["date": [String: Any]()],
                     finished: ["date": [String: Any]()],
+                    plannedStart: ["date": [String: Any]()],
                 ] as [String: Any],
             ],
         ]

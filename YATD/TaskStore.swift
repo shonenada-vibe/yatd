@@ -351,8 +351,9 @@ final class TaskStore {
 
                 // Daily schedule: recurring tasks left undone on a past day move to today.
                 for (task, newDate) in planner.rollovers(open, now: .now) {
-                    try await source.update(task.id, [.date(newDate)])
-                    if let i = open.firstIndex(where: { $0.id == task.id }) { open[i].date = newDate }
+                    let changes = planner.rolloverChanges(task, newDate: newDate)
+                    try await source.update(task.id, changes)
+                    if let i = open.firstIndex(where: { $0.id == task.id }) { open[i] = open[i].applying(changes) }
                 }
                 // Two Macs completing the same recurring task at once can each create the next copy.
                 for dup in planner.duplicates(open) {
@@ -406,6 +407,13 @@ final class TaskStore {
 
     func reopen(_ task: TodoTask) {
         edit(task, task.reopenChanges())
+    }
+
+    /// Sets or clears when you plan to start the task.
+    func setPlannedStart(_ task: TodoTask, _ date: Date?) {
+        guard date != task.plannedStart else { return }
+        edit(task, [.plannedStart(date)])
+        scheduleReminders()
     }
 
     /// Applies `changes` locally at once, then writes them to the task's project in Notion.
@@ -467,10 +475,11 @@ final class TaskStore {
         center.removeAllPendingNotificationRequests()
         guard UserDefaults.standard.bool(forKey: Pref.reminders) else { return }
         for task in planner.timeline(open, now: now) {
-            guard let start = task.date?.start, start > .now else { continue }
+            guard let start = planner.scheduledStart(task, now: now), start > .now else { continue }
             let content = UNMutableNotificationContent()
             content.title = task.title
-            content.body = project(task.projectID).map { "Starts now · \($0.name)" } ?? "Starts now"
+            let when = task.date?.hasTime == true ? "Starts now" : "Planned to start now"
+            content.body = project(task.projectID).map { "\(when) · \($0.name)" } ?? when
             content.sound = .default
             let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: start)
             let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)

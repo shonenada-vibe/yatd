@@ -225,3 +225,86 @@ private func timed(_ s: Date, _ e: Date? = nil) -> TaskDate { TaskDate(start: s,
         #expect(!Schema.matches(properties: wrong))
     }
 }
+
+@Suite struct RunningTaskTests {
+    let now = at(2026, 10, 26, 15)
+
+    @Test func onlyStartedOneTimeTasksRun() {
+        var once = task("once", allDay(at(2026, 10, 26)))
+        once.startedAt = at(2026, 10, 26, 14)
+        #expect(once.isRunning(at: now))
+        #expect(Planner(calendar: cal).bucket(once, now: now) == .inProgress)
+
+        var daily = task("daily", allDay(at(2026, 10, 26)), repeat: .daily)
+        daily.startedAt = at(2026, 10, 26, 14)
+        #expect(!daily.isRunning(at: now))
+        #expect(Planner(calendar: cal).bucket(daily, now: now) == .today)
+
+        var future = task("future", allDay(at(2026, 10, 26)))
+        future.startedAt = at(2026, 10, 26, 21)
+        #expect(!future.isRunning(at: now))
+    }
+}
+
+@Suite struct PlannedStartTests {
+    let planner = Planner(calendar: cal)
+    let now = at(2026, 10, 26, 9, 30)
+
+    private func planned(_ title: String, _ plan: Date?, date: TaskDate? = allDay(at(2026, 10, 26)),
+                         repeat rule: Repeat? = nil) -> TodoTask {
+        var t = task(title, date, repeat: rule)
+        t.plannedStart = plan
+        return t
+    }
+
+    @Test func planMakesAnAllDayTaskBehaveTimed() {
+        let soon = planned("soon", at(2026, 10, 26, 10))       // within the hour → now
+        let evening = planned("evening", at(2026, 10, 26, 19)) // later today → later
+        let plain = planned("plain", nil)                      // today
+        #expect(planner.bucket(soon, now: now) == .now)
+        #expect(planner.bucket(evening, now: now) == .later)
+        #expect(planner.ranked([evening, plain, soon], now: now).map(\.id) == ["soon", "plain", "evening"])
+    }
+
+    @Test func planWithoutDateSetsTheDay() {
+        #expect(planner.bucket(planned("t", at(2026, 10, 26, 9, 45), date: nil), now: now) == .now)
+        #expect(planner.bucket(planned("f", at(2026, 10, 28, 9), date: nil), now: now) == nil)
+        #expect(planner.bucket(planned("o", at(2026, 10, 24, 9), date: nil), now: now) == .overdue)
+    }
+
+    @Test func timelineIncludesPlannedTasks() {
+        let block = task("block", TaskDate(start: at(2026, 10, 26, 11), hasTime: true))
+        let plan = planned("plan", at(2026, 10, 26, 10, 30))
+        #expect(planner.timeline([block, plan, planned("none", nil)], now: now).map(\.id) == ["plan", "block"])
+    }
+
+    @Test func lateOnlyWhenUnstartedPastThePlan() {
+        let t = planned("t", at(2026, 10, 26, 9, 0))
+        #expect(planner.isLate(t, now: now))
+        #expect(!planner.isLate(t, now: at(2026, 10, 26, 9, 5)))
+        var started = t
+        started.startedAt = at(2026, 10, 26, 9, 20)
+        #expect(!planner.isLate(started, now: now))
+    }
+
+    @Test func recurringCopiesAndRolloversKeepThePlannedTime() {
+        let daily = planned("d", at(2026, 10, 26, 8, 15), repeat: .daily)
+        #expect(planner.nextInstance(after: daily, now: now)?.plannedStart == at(2026, 10, 27, 8, 15))
+
+        let stale = planned("s", at(2026, 10, 24, 8, 15), date: allDay(at(2026, 10, 24)), repeat: .daily)
+        let (task, newDate) = planner.rollovers([stale], now: now)[0]
+        #expect(planner.rolloverChanges(task, newDate: newDate) == [.date(allDay(at(2026, 10, 26))), .plannedStart(at(2026, 10, 26, 8, 15))])
+    }
+
+    @Test func quickAddCaretSetsPlan() {
+        let t = QuickAdd.parse("Write report ^14:30 !h", today: at(2026, 10, 26), calendar: cal)
+        #expect(t?.title == "Write report")
+        #expect(t?.plannedStart == at(2026, 10, 26, 14, 30))
+        #expect(t?.date == allDay(at(2026, 10, 26)))
+    }
+
+    @Test func encodesPlanForNotion() {
+        let p = NotionCoding.properties(for: [.plannedStart(at(2026, 10, 26, 14, 30))], calendar: cal)
+        #expect(((p[Schema.plannedStart] as? [String: Any])?["date"] as? [String: String]) == ["start": "2026-10-26T14:30:00+08:00"])
+    }
+}

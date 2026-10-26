@@ -47,17 +47,30 @@ public struct Planner: Sendable {
     /// `nil` means the task isn't relevant today (done, or dated in the future).
     public func bucket(_ task: TodoTask, now: Date) -> Bucket? {
         if task.done { return nil }
-        if task.startedAt != nil { return .inProgress }
-        guard let date = task.date else { return .someday }
+        if task.isRunning(at: now) { return .inProgress }
         let start = dayStart(now), end = dayEnd(now)
-        if date.hasTime {
+        if let date = task.date, date.hasTime {
             if date.start >= end { return nil }
             if date.start < start { return .overdue }
             return date.start.timeIntervalSince(now) <= leadTime ? .now : .later
         }
-        let day = calendar.startOfDay(for: date.start)
+        // An all-day task's day comes from its date, or else from its planned start.
+        guard let dayDate = task.date?.start ?? task.plannedStart else { return .someday }
+        let day = calendar.startOfDay(for: dayDate)
         if day >= end { return nil }
-        return day < start ? .overdue : .today
+        if day < start { return .overdue }
+        // A plan for today makes it behave like a timed task.
+        if let planned = scheduledStart(task, now: now) {
+            return planned.timeIntervalSince(now) <= leadTime ? .now : .later
+        }
+        return .today
+    }
+
+    /// The time a task is set for today: its time block, else its planned start (if today).
+    public func scheduledStart(_ task: TodoTask, now: Date) -> Date? {
+        if let date = task.date, date.hasTime { return date.start }
+        guard let planned = task.plannedStart, planned >= dayStart(now), planned < dayEnd(now) else { return nil }
+        return planned
     }
 
     /// All tasks for today, ordered by importance.
@@ -67,8 +80,9 @@ public struct Planner: Sendable {
             .sorted { a, b in
                 if a.1 != b.1 { return a.1 < b.1 }
                 if a.1 == .inProgress { return a.0.startedAt! < b.0.startedAt! }
-                if a.1 == .now || a.1 == .later, a.0.date!.start != b.0.date!.start {
-                    return a.0.date!.start < b.0.date!.start
+                if a.1 == .now || a.1 == .later,
+                   let sa = scheduledStart(a.0, now: now), let sb = scheduledStart(b.0, now: now), sa != sb {
+                    return sa < sb
                 }
                 let pa = a.0.priority?.rank ?? 2, pb = b.0.priority?.rank ?? 2
                 if pa != pb { return pa < pb }
@@ -84,14 +98,21 @@ public struct Planner: Sendable {
     }
 
     /// Tasks with a time today, in time order, for the timeline view. Includes done ones.
+    /// Tasks with a time today (time block or planned start), in time order, for the timeline
+    /// view. Includes done ones.
     public func timeline(_ tasks: [TodoTask], now: Date) -> [TodoTask] {
         let start = dayStart(now), end = dayEnd(now)
         return tasks
-            .filter { t in
-                guard let d = t.date, d.hasTime else { return false }
-                return d.start >= start && d.start < end
-            }
-            .sorted { $0.date!.start < $1.date!.start }
+            .compactMap { t in scheduledStart(t, now: now).map { (t, $0) } }
+            .filter { $0.1 >= start && $0.1 < end }
+            .sorted { $0.1 < $1.1 }
+            .map(\.0)
+    }
+
+    /// `time`'s time of day on `day`.
+    func sameTime(_ time: Date, on day: Date) -> Date {
+        let c = calendar.dateComponents([.hour, .minute, .second], from: time)
+        return calendar.date(bySettingHour: c.hour!, minute: c.minute!, second: c.second!, of: day) ?? time
     }
 
     // MARK: Recurrence
@@ -130,6 +151,8 @@ public struct Planner: Sendable {
         next.startedAt = nil
         next.finishedAt = nil
         next.date = moved(base, ontoOrAfter: target, rule: rule)
+        // Same planned time of day on the new day.
+        next.plannedStart = task.plannedStart.map { sameTime($0, on: next.date!.start) }
         return next
     }
 
@@ -171,11 +194,34 @@ public struct Planner: Sendable {
             return (t, moved(d, ontoOrAfter: start, rule: rule))
         }
     }
+
+    /// The writes for a rollover: the new date, and the plan moved to the same time that day.
+    public func rolloverChanges(_ task: TodoTask, newDate: TaskDate) -> [TaskChange] {
+        var changes: [TaskChange] = [.date(newDate)]
+        if let planned = task.plannedStart { changes.append(.plannedStart(sameTime(planned, on: newDate.start))) }
+        return changes
+    }
+
+    /// Unstarted one-time tasks this long past their planned start are shown as late.
+    public static let lateAfter: TimeInterval = 10 * 60
+
+    public func isLate(_ task: TodoTask, now: Date) -> Bool {
+        guard !task.done, task.startedAt == nil, let planned = scheduledStart(task, now: now),
+              task.date?.hasTime != true else { return false }
+        return now.timeIntervalSince(planned) > Self.lateAfter
+    }
 }
 
 // MARK: Time tracking
 
 extension TodoTask {
+    /// Started and not finished. Only one-time tasks track time, and a start in the future
+    /// (bad data, clock changes) doesn't count.
+    public func isRunning(at now: Date) -> Bool {
+        guard tracksTime, !done, let startedAt else { return false }
+        return startedAt <= now
+    }
+
     /// Changes for pressing Start: one-time tasks only, and only once.
     public func startChanges(now: Date) -> [TaskChange] {
         guard tracksTime, !done, startedAt == nil else { return [] }
@@ -200,6 +246,7 @@ extension TodoTask {
             case .date(let d): t.date = d
             case .startedAt(let d): t.startedAt = d
             case .finishedAt(let d): t.finishedAt = d
+            case .plannedStart(let d): t.plannedStart = d
             }
         }
         return t

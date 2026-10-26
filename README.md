@@ -109,7 +109,7 @@ Each project is its own Notion page with a tasks database, created inside your Y
 - **Schedule:** Settings → Schedule. Rules like *Weekdays 09:00–18:00 → Work, Side Project* and *Every day 21:00–02:00 → Home*. The first matching rule wins, and outside every rule all projects show. A rule ending before it starts runs past midnight. The panel switches on its own when a rule starts or ends.
 - **Quick add** goes to the first active project. Add `#name` to pick one, for example `Fix login #side !h`.
 
-The project list and rules are kept per Mac. Another Mac can add the same projects from Settings → Projects → Add existing.
+**Shared between Macs:** the project list, schedule rules and day-start hour live in a collapsed **YATD settings** toggle on your YATD page, as JSON. Every Mac reads it on each sync and writes its own changes back after a 2-second pause. On a new Mac, connecting any YATD database brings in the rest. A Mac's first sync merges its local projects and rules into the shared ones. Later, if two Macs edit at once, the latest local edit wins. Panel position, opacity, the connection method and projects picked by hand stay per Mac. You can edit the JSON in Notion; invalid JSON is replaced on the next save.
 
 ## Time tracking (one-time tasks)
 

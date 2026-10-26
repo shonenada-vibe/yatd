@@ -27,7 +27,10 @@ public struct NotionHTTP: NotionTransport {
     }
 
     public func api(_ path: String, method: String, body: [String: Any]?) async throws -> Data {
-        var request = URLRequest(url: baseURL.appending(path: path))
+        // Paths may carry a query string (`…/children?start_cursor=…`), so don't percent-encode them.
+        guard let url = URL(string: baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path)
+        else { throw NotionError.unexpectedResponse("Bad path: \(path)") }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 30
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

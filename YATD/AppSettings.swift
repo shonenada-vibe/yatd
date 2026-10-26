@@ -14,6 +14,7 @@ enum Pref {
     static let pollSeconds = "pollSeconds"
     static let connection = "connection"
     static let clearGlass = "clearGlass"
+    static let showInDock = "showInDock"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -23,6 +24,7 @@ enum Pref {
             dayStartHour: 4,
             reminders: true,
             pollSeconds: 60,
+            showInDock: true,
         ])
     }
 
@@ -41,6 +43,7 @@ enum Pref {
     static let rulesKey = "scheduleRules"
     static let selectionKey = "projectSelection"
     static let rootPageID = "rootPageID"
+    static let lastSharedKey = "lastSharedSettings"
 
     /// The projects shown in YATD, in display order. The single database from before projects
     /// existed becomes the first project.
@@ -62,6 +65,13 @@ enum Pref {
     static var selection: ProjectSelection {
         get { decode(selectionKey) ?? .auto }
         set { encode(newValue, selectionKey) }
+    }
+
+    /// The shared settings as this Mac last read or wrote them in Notion; tells local edits
+    /// apart from another Mac's.
+    static var lastShared: SharedSettings? {
+        get { decode(lastSharedKey) }
+        set { encode(newValue, lastSharedKey) }
     }
 
     private static func decode<T: Decodable>(_ key: String) -> T? {

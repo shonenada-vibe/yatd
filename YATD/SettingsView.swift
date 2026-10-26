@@ -29,6 +29,7 @@ struct GeneralSettings: View {
     @AppStorage(Pref.alwaysOnTop) private var alwaysOnTop = true
     @AppStorage(Pref.opacity) private var opacity = 1.0
     @AppStorage(Pref.clearGlass) private var clearGlass = false
+    @AppStorage(Pref.showInDock) private var showInDock = true
     @AppStorage(Pref.dayStartHour) private var dayStartHour = 4
     @AppStorage(Pref.reminders) private var reminders = true
     @AppStorage(Pref.pollSeconds) private var pollSeconds = 60
@@ -69,10 +70,12 @@ struct GeneralSettings: View {
                 Picker("New day starts at", selection: $dayStartHour) {
                     ForEach(0..<12) { Text(String(format: "%02d:00", $0)).tag($0) }
                 }
+                .onChange(of: dayStartHour) { store.sharedSettingsChanged() }
                 Toggle("Notify when a scheduled task starts", isOn: $reminders)
                     .onChange(of: reminders) { _, on in if on { store.requestNotificationPermission() } }
             }
             Section("General") {
+                Toggle("Show in Dock", isOn: $showInDock)
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in
                         do {
@@ -126,8 +129,11 @@ struct ProjectsSettings: View {
             } header: {
                 Text("Projects")
             } footer: {
-                Text("Each project is a Notion page with its own tasks. Drag to reorder: quick add uses the first active project unless you type #name.")
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Each project is a Notion page with its own tasks. Drag to reorder: quick add uses the first active project unless you type #name.")
+                    if let status = store.sharedSettingsStatus { Text(status) }
+                }
+                .foregroundStyle(.secondary)
             }
 
             Section("New project") {
@@ -206,8 +212,11 @@ struct ScheduleSettings: View {
             } header: {
                 Text("Switch projects by time")
             } footer: {
-                Text("In Auto mode the first matching rule picks the projects; outside every rule, all projects show. A rule ending before it starts runs past midnight. Pick projects by hand from the panel's title menu.")
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("In Auto mode the first matching rule picks the projects; outside every rule, all projects show. A rule ending before it starts runs past midnight. Pick projects by hand from the panel's title menu.")
+                    if let status = store.sharedSettingsStatus { Text(status) }
+                }
+                .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

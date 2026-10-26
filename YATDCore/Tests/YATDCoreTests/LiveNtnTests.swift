@@ -83,3 +83,41 @@ struct LiveProjectTests {
         _ = try await cli.api("/v1/pages/\(pageID)", method: "PATCH", body: ["in_trash": true])
     }
 }
+
+/// Writes and re-reads the shared settings block on a throwaway page, then trashes it.
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["YATD_LIVE_DS"] != nil))
+struct LiveSettingsTests {
+    @Test func saveLoadUpdate() async throws {
+        let ds = ProcessInfo.processInfo.environment["YATD_LIVE_DS"]!
+        let cli = try #require(NtnCLI.locate())
+        let root = try #require(try await NotionSource(dataSourceID: ds, transport: cli).metadata().parentPageID)
+        let pageData = try await cli.api("/v1/pages", method: "POST", body: [
+            "parent": ["type": "page_id", "page_id": root],
+            "properties": ["title": ["title": [["text": ["content": "yatd-live-settings"]]]]],
+        ])
+        let pageID = try #require((try JSONSerialization.jsonObject(with: pageData) as? [String: Any])?["id"] as? String)
+        defer { Task { _ = try? await cli.api("/v1/pages/\(pageID)", method: "PATCH", body: ["in_trash": true]) } }
+
+        let doc = NotionSettingsDocument(rootPageID: pageID, transport: cli)
+        #expect(try await doc.load().settings == nil)
+
+        // Long enough to need several rich text chunks.
+        let projects = (1...40).map { Project(dataSourceID: "ds-\($0)", name: "Project number \($0) with a long name") }
+        var settings = SharedSettings(projects: projects,
+                                      rules: [ScheduleRule(weekdays: [2, 6], startMinute: 1260, endMinute: 120, projectIDs: ["ds-1"])],
+                                      dayStartHour: 4)
+        #expect(try settings.json().count > 2000)
+        let blockID = try await doc.save(settings, codeBlockID: nil)
+        var loaded = try await doc.load()
+        #expect(loaded.settings == settings)
+        #expect(loaded.codeBlockID == blockID)
+
+        settings.dayStartHour = 6
+        settings.projects.removeLast(30)
+        try await doc.save(settings, codeBlockID: blockID)
+        loaded = try await doc.load()
+        #expect(loaded.settings == settings)
+
+        _ = try await cli.api("/v1/pages/\(pageID)", method: "PATCH", body: ["in_trash": true])
+    }
+}

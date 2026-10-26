@@ -45,9 +45,9 @@ launch config="Debug": (build config) stop
 reload config="Debug": stop
     open "$(just app-path {{config}})"
 
-# Quit the running app.
+# Quit the running app and wait for it to exit (reopening too soon fails).
 stop:
-    -@pkill -x {{scheme}}
+    -@pkill -x {{scheme}}; for i in $(seq 50); do pgrep -x {{scheme}} >/dev/null || break; sleep 0.1; done
 
 # Stream the running app's unified logs.
 logs:

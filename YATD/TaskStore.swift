@@ -28,6 +28,13 @@ final class TaskStore {
     /// Projects whose database has been checked for new properties and had its name refreshed.
     private var checkedProjects: Set<String> = []
     private var loop: Task<Void, Never>?
+    /// The code block holding shared settings on the YATD page, once found.
+    private var settingsBlockID: String?
+    private var pushSettings: Task<Void, Never>?
+    /// One settings sync at a time: two at once could both create the settings block.
+    private var isSyncingSettings = false
+    /// Last shared-settings sync result, for Settings ("Synced via Notion" or the error).
+    private(set) var sharedSettingsStatus: String?
 
     var planner: Planner {
         Planner(dayStartHour: UserDefaults.standard.integer(forKey: Pref.dayStartHour))
@@ -180,6 +187,7 @@ final class TaskStore {
         guard !projects.contains(where: { $0.id == project.id }) else { return }
         projects.append(project)
         Pref.projects = projects
+        sharedSettingsChanged()
     }
 
     /// Stops showing a project in YATD. Its page and tasks stay in Notion.
@@ -190,13 +198,16 @@ final class TaskStore {
         allDone.removeAll { $0.projectID == id }
         rules = rules.map { var r = $0; r.projectIDs.removeAll { $0 == id }; return r }
         Pref.rules = rules
+        pushSettings?.cancel()
         if case .manual(let ids) = selection { setSelection(.manual(ids.filter { $0 != id })) }
         saveCache()
+        sharedSettingsChanged()
     }
 
     func moveProjects(from source: IndexSet, to destination: Int) {
         projects.move(fromOffsets: source, toOffset: destination)
         Pref.projects = projects
+        sharedSettingsChanged()
     }
 
     func setSelection(_ new: ProjectSelection) {
@@ -216,6 +227,73 @@ final class TaskStore {
     func setRules(_ new: [ScheduleRule]) {
         rules = new
         Pref.rules = new
+        sharedSettingsChanged()
+    }
+
+    // MARK: Shared settings
+
+    /// Projects, rules and the day start as this Mac has them now.
+    private var localShared: SharedSettings {
+        SharedSettings(projects: projects, rules: rules,
+                       dayStartHour: UserDefaults.standard.integer(forKey: Pref.dayStartHour))
+    }
+
+    /// Writes local changes to Notion after a short pause, so dragging a time picker
+    /// doesn't write on every tick.
+    func sharedSettingsChanged() {
+        pushSettings?.cancel()
+        pushSettings = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let transport = try? self.transport() else { return }
+            await self.syncSharedSettings(transport)
+        }
+    }
+
+    /// Reconciles this Mac with the settings block on the YATD page:
+    /// - none yet: write ours;
+    /// - first sync from this Mac: merge ours into the shared copy;
+    /// - only Notion changed: take it; only we changed: write ours;
+    /// - both changed: ours wins (it's the newer, deliberate edit).
+    private func syncSharedSettings(_ transport: any NotionTransport) async {
+        // A skipped sync isn't lost: the next one still sees local != last and writes it.
+        guard isConfigured, !isSyncingSettings else { return }
+        isSyncingSettings = true
+        defer { isSyncingSettings = false }
+        do {
+            let doc = NotionSettingsDocument(rootPageID: try await rootPageID(transport), transport: transport)
+            let loaded = try await doc.load()
+            settingsBlockID = loaded.codeBlockID ?? settingsBlockID
+            let local = localShared
+            let last = Pref.lastShared
+
+            var result = local
+            if let remote = loaded.settings {
+                if last == nil {
+                    result = remote.merged(withLocal: local)
+                } else if remote != last, local == last {
+                    result = remote
+                }
+                if result != local { applyShared(result) }
+            }
+            if result != loaded.settings {
+                settingsBlockID = try await doc.save(result, codeBlockID: loaded.codeBlockID)
+            }
+            Pref.lastShared = result
+            sharedSettingsStatus = "Shared with your other Macs via the YATD page in Notion."
+        } catch {
+            sharedSettingsStatus = "Couldn't sync settings to Notion: \(error.localizedDescription)"
+        }
+    }
+
+    private func applyShared(_ shared: SharedSettings) {
+        let kept = Set(shared.projects.map(\.id))
+        projects = shared.projects
+        Pref.projects = projects
+        rules = shared.rules
+        Pref.rules = rules
+        if let hour = shared.dayStartHour { UserDefaults.standard.set(hour, forKey: Pref.dayStartHour) }
+        allOpen.removeAll { $0.projectID.map { !kept.contains($0) } ?? false }
+        allDone.removeAll { $0.projectID.map { !kept.contains($0) } ?? false }
     }
 
     // MARK: Sync
@@ -250,6 +328,8 @@ final class TaskStore {
         isSyncing = true
         defer { isSyncing = false }
         now = .now
+        // Another Mac may have added projects or changed the schedule.
+        if let transport = try? transport() { await syncSharedSettings(transport) }
         let ids = activeProjectIDs
         await perform {
             let transport = try self.transport()

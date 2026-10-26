@@ -59,16 +59,32 @@ struct PanelView: View {
         .opacity(opacity)
     }
 
+    /// "Today" with one project; otherwise the active project names.
+    private var title: String {
+        let active = store.activeProjects
+        guard store.projects.count > 1, !active.isEmpty else { return "Today" }
+        if active.count == store.projects.count { return "All projects" }
+        return active.count <= 2 ? active.map(\.name).joined(separator: " + ") : "\(active.count) projects"
+    }
+
     private var header: some View {
         HStack(spacing: 6) {
-            HStack(spacing: 6) {
-                Text("Today").font(.headline)
-                if store.isConfigured {
-                    Text("\(store.doneToday.count)/\(store.doneToday.count + store.rankedCount)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .contentTransition(.numericText())
+            ProjectMenu {
+                HStack(spacing: 6) {
+                    Text(title).font(.headline).lineLimit(1)
+                    if store.isConfigured {
+                        Text("\(store.doneToday.count)/\(store.doneToday.count + store.rankedCount)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
+                    }
+                    if store.projects.count > 1 {
+                        Image(systemName: store.selection == .auto ? "clock" : "chevron.down")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .contentShape(Capsule())
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
@@ -210,6 +226,10 @@ struct TaskRow: View {
 
     private var detail: String? {
         var parts: [String] = []
+        // Name the project when tasks from several are mixed together.
+        if store.activeProjectIDs.count > 1, let project = store.project(task.projectID) {
+            parts.append(project.name)
+        }
         if let tracked = tracking {
             parts.append(tracked)
         } else if let d = task.date {
@@ -296,7 +316,7 @@ struct QuickAddField: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField("Add task  (@10:00  !h  *daily  ~)", text: $text)
+        TextField("Add task  (@10:00  !h  *daily  #project)", text: $text)
             .textFieldStyle(.plain)
             .font(.callout)
             .padding(.horizontal, 14)
@@ -402,4 +422,51 @@ struct TokenSignIn: View {
 
 extension Notification.Name {
     static let focusQuickAdd = Notification.Name("YATDFocusQuickAdd")
+}
+
+/// The title pill's menu: follow the schedule, or pick projects by hand.
+struct ProjectMenu<Label: View>: View {
+    @Environment(TaskStore.self) private var store
+    @Environment(\.openSettings) private var openSettings
+    @ViewBuilder var label: Label
+
+    var body: some View {
+        if store.isConfigured {
+            Menu {
+                Toggle(isOn: Binding(get: { store.selection == .auto }, set: { if $0 { store.setSelection(.auto) } })) {
+                    Text("Auto (by schedule)")
+                    if let rule = store.currentRule {
+                        Text(rule.summary(projects: store.projects))
+                    } else if store.selection == .auto {
+                        Text(store.rules.isEmpty ? "No rules: all projects" : "No rule now: all projects")
+                    }
+                }
+                Section("Projects") {
+                    ForEach(store.projects) { project in
+                        Toggle(project.name, isOn: Binding(
+                            get: { store.activeProjectIDs.contains(project.id) },
+                            set: { _ in store.toggleProject(project.id) }
+                        ))
+                    }
+                }
+                Divider()
+                Button("New Project…") { open(tab: "projects") }
+                Button("Edit Schedule…") { open(tab: "schedule") }
+            } label: {
+                label
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        } else {
+            label
+        }
+    }
+
+    private func open(tab: String) {
+        UserDefaults.standard.set(tab, forKey: "settingsTab")
+        NSApp.activate()
+        openSettings()
+    }
 }

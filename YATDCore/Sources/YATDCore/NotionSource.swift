@@ -47,7 +47,7 @@ public struct NotionSource: TaskSource {
             if let cursor { body["start_cursor"] = cursor }
             let data = try await transport.api("/v1/data_sources/\(dataSourceID)/query", method: "POST", body: body)
             let page = try NotionCoding.tasks(fromQueryResponse: data, calendar: calendar)
-            all += page.tasks
+            all += page.tasks.map { var t = $0; t.projectID = dataSourceID; return t }
             cursor = page.nextCursor
         } while cursor != nil
         return all
@@ -62,13 +62,24 @@ public struct NotionSource: TaskSource {
         guard let page = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let created = NotionCoding.task(fromPage: page, calendar: calendar)
         else { throw NotionError.unexpectedResponse(String(decoding: data, as: UTF8.self)) }
-        return created
+        var tagged = created
+        tagged.projectID = dataSourceID
+        return tagged
     }
 
     public func update(_ id: String, _ changes: [TaskChange]) async throws {
         guard !changes.isEmpty else { return }
         _ = try await transport.api("/v1/pages/\(id)", method: "PATCH",
                               body: ["properties": NotionCoding.properties(for: changes, calendar: calendar)])
+    }
+
+    public func metadata() async throws -> SourceMetadata {
+        let data = try await transport.api("/v1/data_sources/\(dataSourceID)", method: "GET")
+        guard let ds = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { throw NotionError.unexpectedResponse(String(decoding: data, as: UTF8.self)) }
+        let title = (ds["title"] as? [[String: Any]] ?? []).compactMap { $0["plain_text"] as? String }.joined()
+        let parent = (ds["database_parent"] as? [String: Any])?["page_id"] as? String
+        return SourceMetadata(title: title, parentPageID: parent)
     }
 
     public func ensureSchema() async throws {
@@ -87,18 +98,46 @@ public struct NotionSource: TaskSource {
     /// `parentPageID`. Internal integrations (token connections) can't create workspace-level pages,
     /// so they need a parent page shared with them.
     public static func bootstrap(transport: any NotionTransport, parentPageID: String? = nil) async throws -> SourceConfig {
+        try await createPageWithDatabase(transport: transport, parentPageID: parentPageID,
+                                         pageTitle: "YATD", emoji: "✅", databaseTitle: "Tasks")
+    }
+
+    /// A page's title and the page it sits in (nil at the workspace top level).
+    public static func pageInfo(_ pageID: String, transport: any NotionTransport) async throws -> SourceMetadata {
+        let data = try await transport.api("/v1/pages/\(pageID)", method: "GET")
+        guard let page = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { throw NotionError.unexpectedResponse(String(decoding: data, as: UTF8.self)) }
+        let props = page["properties"] as? [String: Any] ?? [:]
+        let titleProp = props.values.compactMap { $0 as? [String: Any] }.first { $0["type"] as? String == "title" }
+        let title = (titleProp?["title"] as? [[String: Any]] ?? []).compactMap { $0["plain_text"] as? String }.joined()
+        let parent = (page["parent"] as? [String: Any])?["page_id"] as? String
+        return SourceMetadata(title: title, parentPageID: parent)
+    }
+
+    /// Creates a project: a page named `name` inside `parentPageID` (the YATD page) with its own
+    /// tasks database. The database is titled after the project so discovery can name it.
+    public static func createProject(named name: String, parentPageID: String,
+                                     transport: any NotionTransport) async throws -> Project {
+        let config = try await createPageWithDatabase(transport: transport, parentPageID: parentPageID,
+                                                      pageTitle: name, emoji: "📁", databaseTitle: name)
+        return Project(config, name: name)
+    }
+
+    private static func createPageWithDatabase(transport: any NotionTransport, parentPageID: String?,
+                                               pageTitle: String, emoji: String, databaseTitle: String) async throws -> SourceConfig {
         let parent: [String: Any] = parentPageID.map { ["type": "page_id", "page_id": $0] }
             ?? ["type": "workspace", "workspace": true]
         let pageData = try await transport.api("/v1/pages", method: "POST", body: [
             "parent": parent,
-            "icon": ["type": "emoji", "emoji": "✅"],
-            "properties": ["title": ["title": [["text": ["content": "YATD"]]]]],
+            "icon": ["type": "emoji", "emoji": emoji],
+            "properties": ["title": ["title": [["text": ["content": pageTitle]]]]],
         ])
         guard let page = try JSONSerialization.jsonObject(with: pageData) as? [String: Any],
               let pageID = page["id"] as? String
         else { throw NotionError.unexpectedResponse(String(decoding: pageData, as: UTF8.self)) }
 
-        let dbData = try await transport.api("/v1/databases", method: "POST", body: Schema.createDatabaseBody(parentPageID: pageID))
+        let dbData = try await transport.api("/v1/databases", method: "POST",
+                                             body: Schema.createDatabaseBody(parentPageID: pageID, title: databaseTitle))
         guard let db = try JSONSerialization.jsonObject(with: dbData) as? [String: Any],
               let sources = db["data_sources"] as? [[String: Any]],
               let dsID = sources.first?["id"] as? String

@@ -49,3 +49,37 @@ struct LiveNtnTests {
         cleanup = []
     }
 }
+
+/// Creates a throwaway project page under the YATD page, then trashes it.
+///   YATD_LIVE_DS=<data source id> swift test --filter LiveProjectTests
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["YATD_LIVE_DS"] != nil))
+struct LiveProjectTests {
+    @Test func createProjectAddTaskAndClean() async throws {
+        let ds = ProcessInfo.processInfo.environment["YATD_LIVE_DS"]!
+        let cli = try #require(NtnCLI.locate())
+
+        // The original Tasks database lives directly in the YATD page.
+        let root = try #require(try await NotionSource(dataSourceID: ds, transport: cli).metadata().parentPageID)
+        let name = "yatd-live-project-\(Int.random(in: 1000...9999))"
+        let project = try await NotionSource.createProject(named: name, parentPageID: root, transport: cli)
+        let pageID = try #require(project.pageURL.flatMap { NotionCoding.extractID($0.absoluteString) })
+        defer { Task { _ = try? await cli.api("/v1/pages/\(pageID)", method: "PATCH", body: ["in_trash": true]) } }
+
+        #expect(project.name == name)
+        let source = NotionSource(dataSourceID: project.id, transport: cli)
+        let meta = try await source.metadata()
+        #expect(meta.title == name)
+        #expect(meta.parentPageID == pageID)
+        // A project page is named like its database and sits in the YATD page.
+        let page = try await NotionSource.pageInfo(pageID, transport: cli)
+        #expect(page.title == name && page.parentPageID == root)
+
+        let draft = try #require(QuickAdd.parse("first task #\(name)", today: Planner().today(.now), projects: [project]))
+        #expect(draft.projectID == project.id)
+        let created = try await source.create(draft)
+        #expect(created.projectID == project.id)
+        #expect(try await source.fetchOpen().map(\.id) == [created.id])
+
+        _ = try await cli.api("/v1/pages/\(pageID)", method: "PATCH", body: ["in_trash": true])
+    }
+}

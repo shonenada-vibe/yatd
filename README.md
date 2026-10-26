@@ -100,6 +100,17 @@ The first three show; the rest is "+N more".
 - **Recurring:** completing a `Daily`/`Weekdays` task creates the next occurrence, keeping its time block.
 - **Timeline:** the second tab lists today's time-blocked tasks and highlights the current one. Optional notifications fire at each start time.
 
+## Projects
+
+Each project is its own Notion page with a tasks database, created inside your YATD page. Your first database is the first project.
+
+- **Create:** Settings → Projects → New project (or "New Project…" in the panel's title menu). Existing YATD databases can be added from the same tab.
+- **Switch:** click the panel's title. Choose **Auto (by schedule)**, or tick projects by hand. With several active, Top 3 ranks across them and each card names its project.
+- **Schedule:** Settings → Schedule. Rules like *Weekdays 09:00–18:00 → Work, Side Project* and *Every day 21:00–02:00 → Home*. The first matching rule wins, and outside every rule all projects show. A rule ending before it starts runs past midnight. The panel switches on its own when a rule starts or ends.
+- **Quick add** goes to the first active project. Add `#name` to pick one, for example `Fix login #side !h`.
+
+The project list and rules are kept per Mac. Another Mac can add the same projects from Settings → Projects → Add existing.
+
 ## Time tracking (one-time tasks)
 
 Press ▶ on a task to record **Started**; ticking it off records **Finished**. The row then shows the start–finish range and its duration. Reopening a task clears Finished and keeps Started. Recurring tasks don't record times.
@@ -120,7 +131,7 @@ Write report !m
 Someday idea ~
 ```
 
-`@HH:mm[-HH:mm]` time block · `!h/!m/!l` priority · `*daily/*weekdays` repeat · `~` no date
+`@HH:mm[-HH:mm]` time block · `!h/!m/!l` priority · `*daily/*weekdays` repeat · `~` no date · `#project` target project
 
 ## Shortcuts
 

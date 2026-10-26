@@ -37,17 +37,39 @@ enum Pref {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: connection) }
     }
 
-    static var sourceConfig: SourceConfig? {
+    static let projectsKey = "projects"
+    static let rulesKey = "scheduleRules"
+    static let selectionKey = "projectSelection"
+    static let rootPageID = "rootPageID"
+
+    /// The projects shown in YATD, in display order. The single database from before projects
+    /// existed becomes the first project.
+    static var projects: [Project] {
         get {
-            let d = UserDefaults.standard
-            guard let id = d.string(forKey: dataSourceID), !id.isEmpty else { return nil }
-            return SourceConfig(dataSourceID: id, pageURL: d.string(forKey: pageURL).flatMap(URL.init(string:)))
+            if let list: [Project] = decode(projectsKey) { return list }
+            guard let id = UserDefaults.standard.string(forKey: dataSourceID), !id.isEmpty else { return [] }
+            let url = UserDefaults.standard.string(forKey: pageURL).flatMap(URL.init(string:))
+            return [Project(dataSourceID: id, name: "Tasks", pageURL: url)]
         }
-        set {
-            let d = UserDefaults.standard
-            d.set(newValue?.dataSourceID, forKey: dataSourceID)
-            d.set(newValue?.pageURL?.absoluteString, forKey: pageURL)
-        }
+        set { encode(newValue, projectsKey) }
+    }
+
+    static var rules: [ScheduleRule] {
+        get { decode(rulesKey) ?? [] }
+        set { encode(newValue, rulesKey) }
+    }
+
+    static var selection: ProjectSelection {
+        get { decode(selectionKey) ?? .auto }
+        set { encode(newValue, selectionKey) }
+    }
+
+    private static func decode<T: Decodable>(_ key: String) -> T? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+    }
+
+    private static func encode<T: Encodable>(_ value: T, _ key: String) {
+        UserDefaults.standard.set(try? JSONEncoder().encode(value), forKey: key)
     }
 }
 

@@ -15,6 +15,18 @@ public protocol TaskSource: Sendable {
     func update(_ id: String, _ changes: [TaskChange]) async throws
     /// Adds properties that newer versions of YATD need to an existing database.
     func ensureSchema() async throws
+    /// The database's current title and the page it lives in.
+    func metadata() async throws -> SourceMetadata
+}
+
+public struct SourceMetadata: Sendable, Equatable {
+    public var title: String
+    public var parentPageID: String?
+
+    public init(title: String, parentPageID: String?) {
+        self.title = title
+        self.parentPageID = parentPageID
+    }
 }
 
 public enum TaskChange: Sendable, Equatable {

@@ -6,8 +6,11 @@ import Foundation
 /// - `!h` / `!m` / `!l` (or `!1` / `!2` / `!3`): priority
 /// - `*daily` / `*weekdays`: repeat
 /// - `~` : no date (someday)
+/// - `#name`: add to the project whose name starts with `name` (spaces ignored)
 public enum QuickAdd {
-    public static func parse(_ text: String, today: Date, calendar: Calendar = .current) -> TodoTask? {
+    public static func parse(_ text: String, today: Date, calendar: Calendar = .current,
+                             projects: [Project] = []) -> TodoTask? {
+        var projectID: String?
         var words: [String] = []
         var date: TaskDate? = TaskDate(start: today, hasTime: false)
         var priority: Priority?
@@ -20,6 +23,8 @@ public enum QuickAdd {
                 priority = p
             } else if token.hasPrefix("*"), let r = Repeat.allCases.first(where: { $0.rawValue.lowercased() == token.dropFirst().lowercased() }) {
                 rule = r
+            } else if token.count > 1, token.hasPrefix("#"), let p = project(matching: String(token.dropFirst()), in: projects) {
+                projectID = p.id
             } else if token == "~" {
                 date = nil
             } else {
@@ -28,7 +33,15 @@ public enum QuickAdd {
         }
         let title = words.joined(separator: " ")
         guard !title.isEmpty else { return nil }
-        return TodoTask(id: "", title: title, date: date, priority: priority, repeat: rule)
+        var task = TodoTask(id: "", title: title, date: date, priority: priority, repeat: rule)
+        task.projectID = projectID
+        return task
+    }
+
+    private static func project(matching prefix: String, in projects: [Project]) -> Project? {
+        func key(_ s: String) -> String { s.lowercased().replacingOccurrences(of: " ", with: "") }
+        let p = key(prefix)
+        return projects.first { key($0.name) == p } ?? projects.first { key($0.name).hasPrefix(p) }
     }
 
     private static func priorityCode(_ c: Character) -> Priority? {

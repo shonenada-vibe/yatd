@@ -32,8 +32,14 @@ struct MenuContent: View {
         Button("Add Task…") { panel.showPanel(focusAdd: true) }
         Button("Refresh") { Task { await store.refresh() } }
             .keyboardShortcut("r")
-        if let url = store.config?.pageURL {
+        if store.projects.count == 1, let url = store.projects[0].pageURL {
             Link("Open in Notion", destination: url)
+        } else if store.projects.count > 1 {
+            Menu("Open in Notion") {
+                ForEach(store.projects) { project in
+                    if let url = project.pageURL { Link(project.name, destination: url) }
+                }
+            }
         }
         Divider()
         SettingsLink { Text("Settings…") }

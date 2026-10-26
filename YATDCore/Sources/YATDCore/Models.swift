@@ -46,6 +46,8 @@ public struct TodoTask: Codable, Sendable, Identifiable, Equatable {
     public var finishedAt: Date?
     public var createdTime: Date
     public var url: URL?
+    /// The project (data source) this task came from. Set locally, not stored in Notion.
+    public var projectID: String?
 
     /// One-time tasks get start/finish times recorded.
     public var tracksTime: Bool { `repeat` == nil }
@@ -105,11 +107,11 @@ public enum Schema {
     }
 
     /// Body for `POST /v1/databases`, creating an inline "Tasks" database under `pageID`.
-    public static func createDatabaseBody(parentPageID: String) -> [String: Any] {
+    public static func createDatabaseBody(parentPageID: String, title: String = "Tasks") -> [String: Any] {
         [
             "parent": ["type": "page_id", "page_id": parentPageID],
             "is_inline": true,
-            "title": [["text": ["content": "Tasks"]]],
+            "title": [["text": ["content": title]]],
             "initial_data_source": [
                 "properties": [
                     name: ["title": [String: Any]()],
